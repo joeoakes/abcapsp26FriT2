@@ -97,38 +97,68 @@ static int handle_post(void *cls,
 
     return ret;
 }
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+// Helper to load file content into a string
+static char *load_file(const char *filename) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) {
+        perror("fopen");
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc(len + 1);
+    if (buf) {
+        fread(buf, 1, len, f);
+        buf[len] = '\0';
+    }
+    fclose(f);
+    return buf;
+}
 
 int main(void) {
-    const char *mongo_uri = getenv("MONGO_URI");
-    const char *mongo_db  = getenv("MONGO_DB");
-    const char *mongo_col = getenv("MONGO_COL");
+    // 1. Get Environment Variables
+    const char *cert_path = getenv("CERT_FILE") ? getenv("CERT_FILE") : "certs/server.crt";
+    const char *key_path  = getenv("KEY_FILE")  ? getenv("KEY_FILE")  : "certs/server.key";
+    int port = getenv("LISTEN_PORT") ? atoi(getenv("LISTEN_PORT")) : DEFAULT_PORT;
 
-    if (!mongo_uri) mongo_uri = "mongodb://localhost:27017";
-    if (!mongo_db)  mongo_db  = "maze";
-    if (!mongo_col) mongo_col = "moves";
+    // 2. Load Certificates into Memory (Required for MHD_OPTION_HTTPS_MEM_*)
+    char *cert_pem = load_file(cert_path);
+    char *key_pem  = load_file(key_path);
 
-    mongoc_init();
-
-    struct MHD_Daemon *daemon = MHD_start_daemon(
-        MHD_USE_THREAD_PER_CONNECTION | MHD_USE_TLS,
-        DEFAULT_PORT,
-        NULL, NULL,
-        &handle_post, NULL,
-        MHD_OPTION_HTTPS_MEM_CERT,
-        cert_file,
-        MHD_OPTION_HTTPS_MEM_KEY,
-        key_file,
-        MHD_OPTION_END);
-
-    if (!daemon) {
-        fprintf(stderr, "Failed to start HTTPS server\n");
+    if (!cert_pem || !key_pem) {
+        fprintf(stderr, "Error: Could not load certificates from %s or %s\n", cert_path, key_path);
         return 1;
     }
 
-    printf("HTTPS server listening on https://localhost:%d/move\n", DEFAULT_PORT);
+    mongoc_init();
+
+    // 3. Start Daemon with actual PEM content
+    struct MHD_Daemon *daemon = MHD_start_daemon(
+        MHD_USE_THREAD_PER_CONNECTION | MHD_USE_TLS,
+        port,
+        NULL, NULL,
+        &handle_post, NULL,
+        MHD_OPTION_HTTPS_MEM_CERT, cert_pem,
+        MHD_OPTION_HTTPS_MEM_KEY,  key_pem,
+        MHD_OPTION_END);
+
+    if (!daemon) {
+        fprintf(stderr, "Failed to start HTTPS server. Check if port %d is open.\n", port);
+        free(cert_pem); free(key_pem);
+        return 1;
+    }
+
+    printf("HTTPS server listening on https://localhost:%d/move\n", port);
     getchar();
 
     MHD_stop_daemon(daemon);
     mongoc_cleanup();
+    free(cert_pem);
+    free(key_pem);
     return 0;
 }
