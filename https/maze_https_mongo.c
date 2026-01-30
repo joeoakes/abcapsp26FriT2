@@ -11,6 +11,8 @@
 #define MAXNAMESIZE     64
 #define MAXANSWERSIZE   512
 
+static const char *cert_file = "certs/server.crt";
+static const char *key_file = "certs/server.key";
 
 struct connection_info {
     char *data;
