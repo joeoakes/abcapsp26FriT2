@@ -1,17 +1,6 @@
 // maze_sdl2.c
-// SDL2 Maze with movement logging to JSON files (one file per run + per new level)
-// Controls: Arrow keys / WASD
-// R = regenerate (creates a NEW JSON file)
-// Esc = quit
-//
-// Output folder (WSL/Windows path):
-//   /mnt/c/Users/pavlo/abcapsp26FriT2/maze/json_logs
-//
-// JSON requirements implemented:
-// - created_at timestamp
-// - moves: array of {x,y} coordinates (movement history, includes starting position)
-// - current: {x,y} written at the end when file closes (on R or exit)
-// - new file per program run AND per new level
+// SDL2 Maze client that sends JSON moves to HTTPS server (/move) using libcurl
+// Controls: Arrow keys / WASD, R regenerate, Esc quit
 
 #include <SDL2/SDL.h>
 #include <stdbool.h>
@@ -20,16 +9,15 @@
 #include <stdlib.h>
 #include <time.h>
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <errno.h>
+#include <curl/curl.h>
 
 #define MAZE_W 21
 #define MAZE_H 15
 #define CELL   32
 #define PAD    16
 
-#define JSON_DIR "/mnt/c/Users/pavlo/abcapsp26FriT2/maze/json_logs"
+// CHANGE THIS IF YOUR SERVER IP/PORT IS DIFFERENT
+#define MOVE_URL "https://10.170.8.101:8443/move"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
@@ -40,98 +28,69 @@ typedef struct {
 
 static Cell g[MAZE_H][MAZE_W];
 
-// ---------------- JSON logging ----------------
-static FILE* json_file = NULL;
-static bool first_move = true;
-
-static char run_stamp[32] = {0};  // e.g. 20260123_213455
-static int level_index = 0;       // 1,2,3... each regenerate creates a new file
-
-static void ensure_json_dir(void) {
-  struct stat st;
-  if (stat(JSON_DIR, &st) == -1) {
-    if (mkdir(JSON_DIR, 0755) != 0 && errno != EEXIST) {
-      perror("mkdir JSON_DIR");
-    }
-  }
-}
-
-static void make_run_stamp_once(void) {
-  if (run_stamp[0] != '\0') return;
-
-  time_t now = time(NULL);
+// ---------- HTTPS JSON sender (libcurl) ----------
+static void iso_utc_now(char out[32]) {
+  time_t t = time(NULL);
   struct tm tmv;
-  localtime_r(&now, &tmv);
-
-  strftime(run_stamp, sizeof(run_stamp), "%Y%m%d_%H%M%S", &tmv);
+  gmtime_r(&t, &tmv);
+  strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 }
 
-// ISO8601-ish local time (no offset)
-static void make_created_at(char out[32]) {
-  time_t now = time(NULL);
-  struct tm tmv;
-  localtime_r(&now, &tmv);
-  strftime(out, 32, "%Y-%m-%dT%H:%M:%S", &tmv);
+static int https_post_json(const char *url, const char *json_body) {
+  CURL *curl = curl_easy_init();
+  if (!curl) return 0;
+
+  struct curl_slist *headers = NULL;
+  headers = curl_slist_append(headers, "Content-Type: application/json");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body);
+
+  // self-signed cert in lab:
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+  CURLcode res = curl_easy_perform(curl);
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  return (res == CURLE_OK);
 }
 
-static void json_close_with_current(int px, int py) {
-  if (!json_file) return;
+static int move_sequence = 0;
+static int level_index = 0;
 
-  // Finish moves array and write current coordinate at the end (requirement)
-  fprintf(json_file, "\n  ],\n");
-  fprintf(json_file, "  \"current\": { \"x\": %d, \"y\": %d }\n", px, py);
-  fprintf(json_file, "}\n");
+static void send_event(const char *event_type, int x, int y, bool goal_reached) {
+  char ts[32];
+  iso_utc_now(ts);
 
-  fclose(json_file);
-  json_file = NULL;
-}
-
-static void json_open_new_file(int start_x, int start_y) {
-  make_run_stamp_once();
-  level_index++;
-
-  ensure_json_dir();
-
-  char filename[256];
-  snprintf(
-    filename,
-    sizeof(filename),
-    "%s/moves_%s_level%02d.json",
-    JSON_DIR,
-    run_stamp,
-    level_index
+  char json[512];
+  snprintf(json, sizeof(json),
+    "{"
+      "\"event_type\":\"%s\","
+      "\"level\":%d,"
+      "\"input\":{\"device\":\"keyboard\",\"move_sequence\":%d},"
+      "\"player\":{\"position\":{\"x\":%d,\"y\":%d}},"
+      "\"goal_reached\":%s,"
+      "\"timestamp\":\"%s\""
+    "}",
+    event_type,
+    level_index,
+    move_sequence,
+    x, y,
+    goal_reached ? "true" : "false",
+    ts
   );
 
-  json_file = fopen(filename, "w");
-  if (!json_file) {
-    perror("fopen");
-    return;
+  if (!https_post_json(MOVE_URL, json)) {
+    fprintf(stderr, "POST failed: %s\n", event_type);
   }
-
-  char created_at[32];
-  make_created_at(created_at);
-
-  // Start JSON and moves list
-  fprintf(json_file, "{\n");
-  fprintf(json_file, "  \"created_at\": \"%s\",\n", created_at);
-  fprintf(json_file, "  \"level\": %d,\n", level_index);
-  fprintf(json_file, "  \"moves\": [\n");
-
-  // Log starting coordinate as first move
-  fprintf(json_file, "    { \"x\": %d, \"y\": %d }", start_x, start_y);
-  first_move = false;
-
-  fflush(json_file);
 }
-
-static void json_append_move(int x, int y) {
-  if (!json_file) return;
-
-  // Always append with a comma+newline because the first entry is written at open
-  fprintf(json_file, ",\n    { \"x\": %d, \"y\": %d }", x, y);
-  fflush(json_file);
-}
-// ------------------------------------------------
+// -----------------------------------------------
 
 static inline bool in_bounds(int x, int y) {
   return (x >= 0 && x < MAZE_W && y >= 0 && y < MAZE_H);
@@ -201,65 +160,6 @@ static void maze_generate(int sx, int sy) {
       g[y][x].visited = false;
 }
 
-<<<<<<< HEAD
-// Draw maze walls as lines
-static void draw_maze(SDL_Renderer* r) {
-  // Background
-  SDL_SetRenderDrawColor(r, 15, 15, 18, 255);
-  SDL_RenderClear(r);
-
-  // Maze lines
-  SDL_SetRenderDrawColor(r, 230, 230, 230, 255);
-
-  int ox = PAD;
-  int oy = PAD;
-
-  for (int y = 0; y < MAZE_H; y++) {
-    for (int x = 0; x < MAZE_W; x++) {
-      int x0 = ox + x * CELL;
-      int y0 = oy + y * CELL;
-      int x1 = x0 + CELL;
-      int y1 = y0 + CELL;
-
-      uint8_t w = g[y][x].walls;
-
-      if (w & WALL_N) SDL_RenderDrawLine(r, x0, y0, x1, y0);
-      if (w & WALL_E) SDL_RenderDrawLine(r, x1, y0, x1, y1);
-      if (w & WALL_S) SDL_RenderDrawLine(r, x0, y1, x1, y1);
-      if (w & WALL_W) SDL_RenderDrawLine(r, x0, y0, x0, y1);
-    }
-  }
-}
-
-// Player / goal rendering
-static void draw_player_goal(SDL_Renderer* r, int px, int py) {
-  int ox = PAD;
-  int oy = PAD;
-
-  // Goal cell highlight
-  SDL_Rect goal = {
-    ox + (MAZE_W - 1) * CELL + 6,
-    oy + (MAZE_H - 1) * CELL + 6,
-    CELL - 12,
-    CELL - 12
-  };
-  SDL_SetRenderDrawColor(r, 40, 160, 70, 255);
-  SDL_RenderFillRect(r, &goal);
-
-  // Player
-  SDL_Rect p = {
-    ox + px * CELL + 8,
-    oy + py * CELL + 8,
-    CELL - 16,
-    CELL - 16
-  };
-  SDL_SetRenderDrawColor(r, 255, 215, 0, 255);
-  SDL_RenderFillRect(r, &p);
-}
-
-// Attempt to move player; returns true if moved
-=======
->>>>>>> dc3b009d51850d696213474f7c842b6b75e5e48b
 static bool try_move(int* px, int* py, int dx, int dy) {
   int x = *px, y = *py;
   int nx = x + dx, ny = y + dy;
@@ -321,10 +221,8 @@ static void draw(SDL_Renderer* r, int px, int py) {
 }
 
 static void regenerate(int* px, int* py) {
-  // Close the previous file with current coordinate at the end
-  if (json_file) {
-    json_close_with_current(*px, *py);
-  }
+  // send end event for previous level (optional but nice)
+  send_event("session_end", *px, *py, (*px == MAZE_W-1 && *py == MAZE_H-1));
 
   maze_init();
   maze_generate(0, 0);
@@ -332,12 +230,16 @@ static void regenerate(int* px, int* py) {
   *px = 0;
   *py = 0;
 
-  // Open a NEW JSON file for this level and log starting coordinate
-  json_open_new_file(*px, *py);
+  level_index++;
+  move_sequence = 0;
+
+  // send start event
+  send_event("level_start", *px, *py, false);
 }
 
 int main(void) {
   srand((unsigned)time(NULL));
+  curl_global_init(CURL_GLOBAL_DEFAULT);
 
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -367,8 +269,9 @@ int main(void) {
 
   int px = 0, py = 0;
 
-  // First level: creates a NEW JSON file for this run
-  regenerate(&px, &py);
+  // First level
+  level_index = 0;
+  regenerate(&px, &py); // increments to level 1 and sends start event
 
   bool running = true;
   while (running) {
@@ -399,7 +302,9 @@ int main(void) {
         else if (k == SDLK_LEFT || k == SDLK_a) moved = try_move(&px, &py, -1, 0);
 
         if (moved) {
-          json_append_move(px, py);
+          move_sequence++;
+          bool goal = (px == MAZE_W - 1 && py == MAZE_H - 1);
+          send_event("player_move", px, py, goal);
         }
       }
     }
@@ -407,13 +312,12 @@ int main(void) {
     draw(r, px, py);
   }
 
-  // Close the last file, ensuring current is at the end
-  if (json_file) {
-    json_close_with_current(px, py);
-  }
+  // final end event
+  send_event("session_end", px, py, (px == MAZE_W-1 && py == MAZE_H-1));
 
   SDL_DestroyRenderer(r);
   SDL_DestroyWindow(win);
   SDL_Quit();
+  curl_global_cleanup();
   return 0;
 }
