@@ -1,19 +1,17 @@
-// maze_sdl2_mongo.c
-// SDL2 Maze that logs moves to remote MongoDB
+// maze_terminal.c
+// Terminal-based maze that logs moves to MongoDB
 
-#include <SDL2/SDL.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
+#include <string.h>
 
 #include <mongoc/mongoc.h>
 
 #define MAZE_W 21
 #define MAZE_H 15
-#define CELL   32
-#define PAD    16
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
@@ -184,127 +182,88 @@ static bool try_move(int* px, int* py, int dx, int dy) {
     return true;
 }
 
-static void draw(SDL_Renderer* r, int px, int py) {
-    SDL_SetRenderDrawColor(r, 15, 15, 18, 255);
-    SDL_RenderClear(r);
+/* ---------------- Display ---------------- */
 
-    SDL_SetRenderDrawColor(r, 230, 230, 230, 255);
+static void print_maze(int px, int py) {
     for (int y = 0; y < MAZE_H; y++) {
+        // Print top walls
         for (int x = 0; x < MAZE_W; x++) {
-            int ox = PAD + x * CELL;
-            int oy = PAD + y * CELL;
-            int ex = ox + CELL;
-            int ey = oy + CELL;
-            uint8_t w = g[y][x].walls;
-
-            if (w & WALL_N) SDL_RenderDrawLine(r, ox, oy, ex, oy);
-            if (w & WALL_E) SDL_RenderDrawLine(r, ex, oy, ex, ey);
-            if (w & WALL_S) SDL_RenderDrawLine(r, ox, ey, ex, ey);
-            if (w & WALL_W) SDL_RenderDrawLine(r, ox, oy, ox, ey);
+            printf("+");
+            printf((g[y][x].walls & WALL_N) ? "---" : "   ");
         }
+        printf("+\n");
+
+        // Print sides and player
+        for (int x = 0; x < MAZE_W; x++) {
+            printf((g[y][x].walls & WALL_W) ? "|" : " ");
+            if (x == px && y == py)
+                printf(" P ");
+            else if (x == MAZE_W-1 && y == MAZE_H-1)
+                printf(" G "); // Goal
+            else
+                printf("   ");
+        }
+        printf((g[y][MAZE_W-1].walls & WALL_E) ? "|\n" : " \n");
     }
-
-    SDL_Rect p = {
-        PAD + px * CELL + 8,
-        PAD + py * CELL + 8,
-        CELL - 16, CELL - 16
-    };
-    SDL_SetRenderDrawColor(r, 255, 215, 0, 255);
-    SDL_RenderFillRect(r, &p);
-
-    SDL_RenderPresent(r);
+    // Bottom line
+    for (int x = 0; x < MAZE_W; x++) printf("+---");
+    printf("+\n");
 }
+
+/* ---------------- Main ---------------- */
 
 static void regenerate(int* px, int* py) {
     if (run_level > 0)
         mongo_finish_level(*px, *py);
 
     maze_init();
-    maze_generate(0, 0);
-
-    *px = 0;
-    *py = 0;
-
-    mongo_start_level(*px, *py);
+    maze_generate(0,0);
+    *px = 0; *py = 0;
+    mongo_start_level(*px,*py);
 }
 
 int main(void) {
-    srand((unsigned)time(NULL));
-
+    srand(time(NULL));
     mongoc_init();
-
     client = mongoc_client_new(
         "mongodb://team2f:team2psu@10.170.8.109:8448/?authSource=admin"
     );
-
     if (!client) {
-        fprintf(stderr, "Failed to connect to MongoDB\n");
+        fprintf(stderr,"MongoDB connection failed\n");
         return 1;
     }
+    collection = mongoc_client_get_collection(client,"maze_game","runs");
 
-    collection = mongoc_client_get_collection(
-        client,
-        "maze_game",
-        "runs"
-    );
+    int px=0, py=0;
+    regenerate(&px,&py);
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        fprintf(stderr, "SDL_Init failed\n");
-        return 1;
-    }
+    char cmd[32];
+    while (1) {
+        print_maze(px, py);
+        printf("Move (w/a/s/d), r=regenerate, q=quit: ");
+        if (!fgets(cmd,sizeof(cmd),stdin)) break;
 
-    SDL_Window* win = SDL_CreateWindow(
-        "SDL2 Maze Mongo",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        PAD * 2 + MAZE_W * CELL,
-        PAD * 2 + MAZE_H * CELL,
-        SDL_WINDOW_SHOWN
-    );
+        if (cmd[0]=='q') break;
+        if (cmd[0]=='r') { regenerate(&px,&py); continue; }
 
-    SDL_Renderer* r = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+        bool moved = false;
+        if (cmd[0]=='w') moved = try_move(&px,&py,0,-1);
+        else if (cmd[0]=='s') moved = try_move(&px,&py,0,1);
+        else if (cmd[0]=='a') moved = try_move(&px,&py,-1,0);
+        else if (cmd[0]=='d') moved = try_move(&px,&py,1,0);
 
-    int px = 0, py = 0;
-    regenerate(&px, &py);
+        if (moved) mongo_append_move(px,py);
 
-    bool running = true;
-    while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT)
-                running = false;
-
-            if (e.type == SDL_KEYDOWN) {
-                SDL_Keycode k = e.key.keysym.sym;
-
-                if (k == SDLK_ESCAPE)
-                    running = false;
-
-                if (k == SDLK_r)
-                    regenerate(&px, &py);
-
-                bool moved = false;
-                if (k == SDLK_UP) moved = try_move(&px,&py,0,-1);
-                else if (k == SDLK_RIGHT) moved = try_move(&px,&py,1,0);
-                else if (k == SDLK_DOWN) moved = try_move(&px,&py,0,1);
-                else if (k == SDLK_LEFT) moved = try_move(&px,&py,-1,0);
-
-                if (moved)
-                    mongo_append_move(px, py);
-            }
+        if (px==MAZE_W-1 && py==MAZE_H-1) {
+            printf("🎉 You reached the goal!\n");
+            regenerate(&px,&py);
         }
-
-        draw(r, px, py);
     }
 
-    mongo_finish_level(px, py);
-
+    mongo_finish_level(px,py);
     mongoc_collection_destroy(collection);
     mongoc_client_destroy(client);
     mongoc_cleanup();
-
-    SDL_DestroyRenderer(r);
-    SDL_DestroyWindow(win);
-    SDL_Quit();
 
     return 0;
 }
