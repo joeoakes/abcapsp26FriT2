@@ -113,7 +113,7 @@ static int handle_post(void *cls,
     const char *mongo_col = getenv("MONGO_COL");
     if (!mongo_uri) mongo_uri = "mongodb://localhost:27017";
     if (!mongo_db)  mongo_db  = "maze";
-    if (!mongo_col) mongo_col = "moves";
+    if (!mongo_col) mongo_col = "team2fmoves";
 
     mongoc_client_t *client = mongoc_client_new(mongo_uri);
     if (!client) {
