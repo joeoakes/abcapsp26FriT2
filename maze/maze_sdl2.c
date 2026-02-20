@@ -18,6 +18,7 @@
 
 // CHANGE THIS IF YOUR SERVER IP/PORT IS DIFFERENT
 #define MOVE_URL "https://10.170.8.101:8448/move"
+#define MISSION_URL "https://10.170.8.109:8448/mission"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
@@ -220,6 +221,29 @@ static void draw(SDL_Renderer* r, int px, int py) {
   SDL_RenderPresent(r);
 }
 
+static void send_mission_payload(int level, int w, int h) {
+    char ts[32];
+    iso_utc_now(ts);
+
+    char json[512];
+    snprintf(json, sizeof(json),
+        "{"
+          "\"event_type\":\"mission_setup\","
+          "\"team_id\":\"Team 2 Friday\","
+          "\"mission_id\":\"T2_FRI_LVL_%d\","
+          "\"map_dimensions\":{\"width\":%d,\"height\":%d},"
+          "\"timestamp\":\"%s\""
+        "}",
+        level, w, h, ts
+    );
+
+    if (!https_post_json(MISSION_URL, json)) {
+        fprintf(stderr, "AI Server (10.170.8.109) Mission Payload failed!\n");
+    } else {
+        printf("Mission Payload sent to AI Server.\n");
+    }
+}
+
 static void regenerate(int* px, int* py) {
   // send end event for previous level (optional but nice)
   send_event("session_end", *px, *py, (*px == MAZE_W-1 && *py == MAZE_H-1));
@@ -234,6 +258,7 @@ static void regenerate(int* px, int* py) {
   move_sequence = 0;
 
   // send start event
+  send_mission_payload(level_index, MAZE_W, MAZE_H);
   send_event("level_start", *px, *py, false);
 }
 
