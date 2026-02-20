@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-#define DEFAULT_PORT 6379
+#define DEFAULT_PORT 8448
 #define POSTBUFFERSIZE 65536
 
 struct connection_info {
