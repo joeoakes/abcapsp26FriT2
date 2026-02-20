@@ -6,13 +6,30 @@
 #include <time.h>
 
 #define DEFAULT_PORT 8448
-#define POSTBUFFERSIZE 65536
 
+// 1. Data Structures
 struct connection_info {
     char *data;
     size_t size;
 };
 
+// 2. Helper to load SSL Certificates
+static char *load_file(const char *filename) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (len <= 0) { fclose(f); return NULL; }
+    char *buf = malloc((size_t)len + 1);
+    if (!buf) { fclose(f); return NULL; }
+    size_t got = fread(buf, 1, (size_t)len, f);
+    buf[got] = '\0';
+    fclose(f);
+    return buf;
+}
+
+// 3. Response Helper
 static enum MHD_Result respond_json(struct MHD_Connection *connection, unsigned int status, const char *body) {
     struct MHD_Response *resp = MHD_create_response_from_buffer(strlen(body), (void *)body, MHD_RESPMEM_PERSISTENT);
     if (!resp) return MHD_NO;
@@ -22,9 +39,10 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection, unsigned 
     return ret;
 }
 
-// Update handle_post to return enum MHD_Result
+// 4. POST Handler (Redis Logic)
 static enum MHD_Result handle_post(void *cls, struct MHD_Connection *connection, const char *url, const char *method,
                        const char *version, const char *upload_data, size_t *upload_data_size, void **con_cls) {
+    
     if (strcmp(url, "/mission") != 0) {
         return respond_json(connection, 404, "{\"error\":\"Only /mission supported\"}");
     }
@@ -54,7 +72,6 @@ static enum MHD_Result handle_post(void *cls, struct MHD_Connection *connection,
     }
 
     // Save payload to Redis Hash
-    // Note: In a real app, you'd parse the JSON to get a real mission_id
     redisCommand(c, "HSET mission:T2_FRI:summary payload %s status active", ci->data);
     
     redisFree(c);
@@ -65,6 +82,7 @@ static enum MHD_Result handle_post(void *cls, struct MHD_Connection *connection,
     return respond_json(connection, 200, "{\"status\":\"ok\",\"stored\":\"redis\"}");
 }
 
+// 5. Main (The Start-up Logic)
 int main() {
     // Load SSL certs
     char *cert_pem = load_file("certs/server.crt"); 
