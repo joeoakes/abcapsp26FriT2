@@ -13,15 +13,17 @@ struct connection_info {
     size_t size;
 };
 
-static int respond_json(struct MHD_Connection *connection, unsigned int status, const char *body) {
+static enum MHD_Result respond_json(struct MHD_Connection *connection, unsigned int status, const char *body) {
     struct MHD_Response *resp = MHD_create_response_from_buffer(strlen(body), (void *)body, MHD_RESPMEM_PERSISTENT);
+    if (!resp) return MHD_NO;
     MHD_add_response_header(resp, "Content-Type", "application/json");
-    int ret = MHD_queue_response(connection, status, resp);
+    enum MHD_Result ret = MHD_queue_response(connection, status, resp);
     MHD_destroy_response(resp);
     return ret;
 }
 
-static int handle_post(void *cls, struct MHD_Connection *connection, const char *url, const char *method,
+// Update handle_post to return enum MHD_Result
+static enum MHD_Result handle_post(void *cls, struct MHD_Connection *connection, const char *url, const char *method,
                        const char *version, const char *upload_data, size_t *upload_data_size, void **con_cls) {
     if (strcmp(url, "/mission") != 0) {
         return respond_json(connection, 404, "{\"error\":\"Only /mission supported\"}");
