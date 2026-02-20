@@ -8,6 +8,30 @@
 #define DEFAULT_PORT 8448
 #define POSTBUFFERSIZE 65536
 
+int main() {
+    char *cert_pem = load_file("certs/server.crt"); 
+    char *key_pem  = load_file("certs/server.key");
+
+    if (!cert_pem || !key_pem) {
+        fprintf(stderr, "SSL Error: Could not load certs/server.crt or certs/server.key\n");
+        return 1;
+    }
+
+    int port = getenv("LISTEN_PORT") ? atoi(getenv("LISTEN_PORT")) : DEFAULT_PORT;
+
+    // 2. Add MHD_USE_TLS and the cert options
+    struct MHD_Daemon *d = MHD_start_daemon(
+        MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_TLS, // ADDED MHD_USE_TLS
+        (uint16_t)port,
+        NULL, NULL,
+        &handle_post, NULL,
+        MHD_OPTION_HTTPS_MEM_CERT, cert_pem,           // ADDED CERT
+        MHD_OPTION_HTTPS_MEM_KEY,  key_pem,            // ADDED KEY
+        MHD_OPTION_END
+    );
+    
+    // ... rest of your code ...
+
 struct connection_info {
     char *data;
     size_t size;
