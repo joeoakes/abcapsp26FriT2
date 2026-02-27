@@ -12,10 +12,10 @@ struct connection_info {
     size_t size;
 };
 
-// ---------------- Helper: JSON Response ----------------
-static int respond_json(struct MHD_Connection *connection,
-                        unsigned int status,
-                        const char *body)
+// ---------------- JSON Response ----------------
+static enum MHD_Result respond_json(struct MHD_Connection *connection,
+                                    unsigned int status,
+                                    const char *body)
 {
     struct MHD_Response *resp =
         MHD_create_response_from_buffer(strlen(body),
@@ -24,12 +24,14 @@ static int respond_json(struct MHD_Connection *connection,
 
     MHD_add_response_header(resp, "Content-Type", "application/json");
 
-    int ret = MHD_queue_response(connection, status, resp);
+    enum MHD_Result ret =
+        MHD_queue_response(connection, status, resp);
+
     MHD_destroy_response(resp);
     return ret;
 }
 
-// ---------------- ROS2 Movement Publisher ----------------
+// ---------------- ROS2 Publisher ----------------
 void mp2_set_velocity(float linear, float angular)
 {
     char cmd[512];
@@ -44,24 +46,20 @@ void mp2_set_velocity(float linear, float angular)
     system(cmd);
 }
 
-// ---------------- Direction → Velocity Mapping ----------------
+// ---------------- Direction Mapping ----------------
 void process_move_command(const char *dir)
 {
     float linear = 0.0;
     float angular = 0.0;
 
-    if (strcmp(dir, "forward") == 0) {
+    if (strcmp(dir, "forward") == 0)
         linear = 0.5;
-    }
-    else if (strcmp(dir, "backward") == 0) {
+    else if (strcmp(dir, "backward") == 0)
         linear = -0.5;
-    }
-    else if (strcmp(dir, "left") == 0) {
+    else if (strcmp(dir, "left") == 0)
         angular = 1.0;
-    }
-    else if (strcmp(dir, "right") == 0) {
+    else if (strcmp(dir, "right") == 0)
         angular = -1.0;
-    }
     else {
         printf("Unknown move_dir: %s\n", dir);
         return;
@@ -71,14 +69,14 @@ void process_move_command(const char *dir)
 }
 
 // ---------------- POST Handler ----------------
-static int handle_post(void *cls,
-                       struct MHD_Connection *connection,
-                       const char *url,
-                       const char *method,
-                       const char *version,
-                       const char *upload_data,
-                       size_t *upload_data_size,
-                       void **con_cls)
+static enum MHD_Result handle_post(void *cls,
+                                   struct MHD_Connection *connection,
+                                   const char *url,
+                                   const char *method,
+                                   const char *version,
+                                   const char *upload_data,
+                                   size_t *upload_data_size,
+                                   void **con_cls)
 {
     if (strcmp(method, "POST") != 0)
         return MHD_NO;
@@ -93,7 +91,7 @@ static int handle_post(void *cls,
     struct connection_info *ci =
         (struct connection_info *)*con_cls;
 
-    // Collect upload data
+    // Collect POST data
     if (*upload_data_size != 0) {
         ci->data = realloc(ci->data,
                            ci->size + *upload_data_size + 1);
@@ -109,7 +107,7 @@ static int handle_post(void *cls,
         return MHD_YES;
     }
 
-    // --------- Process JSON ---------
+    // -------- Process JSON --------
     printf("Received JSON:\n%s\n", ci->data);
 
     char move_dir[64] = {0};
@@ -124,7 +122,7 @@ static int handle_post(void *cls,
         process_move_command(move_dir);
     }
     else {
-        printf("move_dir not found\n");
+        printf("move_dir not found in JSON\n");
     }
 
     free(ci->data);
