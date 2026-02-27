@@ -4,15 +4,13 @@
 #include <string.h>
 #include <unistd.h>
 
-#define PORT 8448
+#define PORT 8449   // <-- matches your curl now
 
-// ---------------- Connection Info ----------------
 struct connection_info {
     char *data;
     size_t size;
 };
 
-// ---------------- JSON Response ----------------
 static enum MHD_Result respond_json(struct MHD_Connection *connection,
                                     unsigned int status,
                                     const char *body)
@@ -31,8 +29,10 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
     return ret;
 }
 
-// ---------------- ROS2 Publisher ----------------
-void mp2_set_velocity(float linear, float angular)
+/* --------------------------------------------------
+   MOVE USING YOUR /cmd_vel COMMAND
+-------------------------------------------------- */
+void publish_velocity(float linear, float angular)
 {
     char cmd[512];
 
@@ -42,12 +42,14 @@ void mp2_set_velocity(float linear, float angular)
         "angular: {x: 0.0, y: 0.0, z: %.2f}}\"",
         linear, angular);
 
-    printf("Executing: %s\n", cmd);
+    printf("Executing:\n%s\n", cmd);
     system(cmd);
 }
 
-// ---------------- Direction Mapping ----------------
-void process_move_command(const char *dir)
+/* --------------------------------------------------
+   Direction Mapping
+-------------------------------------------------- */
+void process_move(const char *dir)
 {
     float linear = 0.0;
     float angular = 0.0;
@@ -61,14 +63,40 @@ void process_move_command(const char *dir)
     else if (strcmp(dir, "right") == 0)
         angular = -1.0;
     else {
-        printf("Unknown move_dir: %s\n", dir);
+        printf("Invalid direction: %s\n", dir);
         return;
     }
 
-    mp2_set_velocity(linear, angular);
+    publish_velocity(linear, angular);
 }
 
-// ---------------- POST Handler ----------------
+/* --------------------------------------------------
+   Robust move_dir extraction
+-------------------------------------------------- */
+void extract_move_dir(const char *json, char *out)
+{
+    char *key = strstr(json, "\"move_dir\"");
+    if (!key) return;
+
+    char *colon = strchr(key, ':');
+    if (!colon) return;
+
+    char *first_quote = strchr(colon, '\"');
+    if (!first_quote) return;
+
+    first_quote++; // move past first quote
+
+    char *second_quote = strchr(first_quote, '\"');
+    if (!second_quote) return;
+
+    size_t len = second_quote - first_quote;
+    strncpy(out, first_quote, len);
+    out[len] = '\0';
+}
+
+/* --------------------------------------------------
+   HTTPS POST Handler
+-------------------------------------------------- */
 static enum MHD_Result handle_post(void *cls,
                                    struct MHD_Connection *connection,
                                    const char *url,
@@ -91,7 +119,6 @@ static enum MHD_Result handle_post(void *cls,
     struct connection_info *ci =
         (struct connection_info *)*con_cls;
 
-    // Collect POST data
     if (*upload_data_size != 0) {
         ci->data = realloc(ci->data,
                            ci->size + *upload_data_size + 1);
@@ -107,22 +134,16 @@ static enum MHD_Result handle_post(void *cls,
         return MHD_YES;
     }
 
-    // -------- Process JSON --------
     printf("Received JSON:\n%s\n", ci->data);
 
     char move_dir[64] = {0};
-    char *pos = strstr(ci->data, "\"move_dir\"");
+    extract_move_dir(ci->data, move_dir);
 
-    if (pos) {
-        sscanf(pos,
-               "\"move_dir\"%*[^:]:\"%63[^\"]\"",
-               move_dir);
-
+    if (strlen(move_dir) > 0) {
         printf("Parsed move_dir: %s\n", move_dir);
-        process_move_command(move_dir);
-    }
-    else {
-        printf("move_dir not found in JSON\n");
+        process_move(move_dir);
+    } else {
+        printf("move_dir not found\n");
     }
 
     free(ci->data);
@@ -134,12 +155,13 @@ static enum MHD_Result handle_post(void *cls,
                         "{\"status\":\"success\"}");
 }
 
-// ---------------- Load TLS File ----------------
+/* --------------------------------------------------
+   Load TLS
+-------------------------------------------------- */
 static char *load_file(const char *filename)
 {
     FILE *f = fopen(filename, "r");
-    if (!f)
-        return NULL;
+    if (!f) return NULL;
 
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
@@ -153,14 +175,16 @@ static char *load_file(const char *filename)
     return buf;
 }
 
-// ---------------- MAIN ----------------
+/* --------------------------------------------------
+   MAIN
+-------------------------------------------------- */
 int main()
 {
     char *cert = load_file("certs/server.crt");
     char *key  = load_file("certs/server.key");
 
     if (!cert || !key) {
-        printf("Failed to load TLS certificate/key\n");
+        printf("Failed to load TLS files\n");
         return 1;
     }
 
