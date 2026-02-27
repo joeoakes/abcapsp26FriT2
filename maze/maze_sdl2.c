@@ -17,8 +17,8 @@
 #define PAD    16
 
 // CHANGE THIS IF YOUR SERVER IP/PORT IS DIFFERENT
-#define MOVE_URL "https://10.170.8.101:8448/move"
-#define MISSION_URL "https://10.170.8.130:8448/mission"
+#define MOVE_URL "https://10.170.8.130:8448/move"
+#define MISSION_URL "https://10.170.8.109:8448/mission"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
