@@ -3,13 +3,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define PORT 8449
+
+/* ---------------- Queue ---------------- */
+
+typedef struct Move {
+    char dir[32];
+    struct Move *next;
+} Move;
+
+Move *head = NULL;
+Move *tail = NULL;
+
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* ---------------- Connection ---------------- */
 
 struct connection_info {
     char *data;
     size_t size;
 };
+
+/* ---------------- Response ---------------- */
 
 static enum MHD_Result respond_json(struct MHD_Connection *connection,
                                     unsigned int status,
@@ -29,14 +46,12 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
     return ret;
 }
 
-/* --------------------------------------------------
-   MOVE FOR 3 SECONDS THEN STOP
--------------------------------------------------- */
+/* ---------------- Movement ---------------- */
+
 void publish_velocity(float linear, float angular)
 {
     char cmd[512];
 
-    // Move for 3 seconds
     snprintf(cmd, sizeof(cmd),
         "timeout 3 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
         "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, "
@@ -46,7 +61,6 @@ void publish_velocity(float linear, float angular)
     printf("Executing (3s move):\n%s\n", cmd);
     system(cmd);
 
-    // Stop after movement
     snprintf(cmd, sizeof(cmd),
         "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
         "\"{linear: {x: 0.0, y: 0.0, z: 0.0}, "
@@ -56,9 +70,6 @@ void publish_velocity(float linear, float angular)
     system(cmd);
 }
 
-/* --------------------------------------------------
-   Direction Mapping
--------------------------------------------------- */
 void process_move(const char *dir)
 {
     float linear = 0.0;
@@ -80,9 +91,60 @@ void process_move(const char *dir)
     publish_velocity(linear, angular);
 }
 
-/* --------------------------------------------------
-   Extract move_dir from JSON
--------------------------------------------------- */
+/* ---------------- Queue Logic ---------------- */
+
+void enqueue_move(const char *dir)
+{
+    Move *m = malloc(sizeof(Move));
+    strcpy(m->dir, dir);
+    m->next = NULL;
+
+    pthread_mutex_lock(&lock);
+
+    if (!tail)
+        head = tail = m;
+    else {
+        tail->next = m;
+        tail = m;
+    }
+
+    pthread_mutex_unlock(&lock);
+}
+
+Move* dequeue_move()
+{
+    pthread_mutex_lock(&lock);
+
+    Move *m = head;
+    if (m) {
+        head = head->next;
+        if (!head) tail = NULL;
+    }
+
+    pthread_mutex_unlock(&lock);
+    return m;
+}
+
+/* ---------------- Worker Thread ---------------- */
+
+void *worker(void *arg)
+{
+    while (1) {
+        Move *m = dequeue_move();
+
+        if (m) {
+            printf("Processing queued move: %s\n", m->dir);
+            process_move(m->dir);
+            free(m);
+        } else {
+            usleep(100000); // 100ms
+        }
+    }
+    return NULL;
+}
+
+/* ---------------- JSON Parsing ---------------- */
+
 void extract_move_dir(const char *json, char *out)
 {
     char *key = strstr(json, "\"move_dir\"");
@@ -104,9 +166,8 @@ void extract_move_dir(const char *json, char *out)
     out[len] = '\0';
 }
 
-/* --------------------------------------------------
-   HTTPS POST Handler
--------------------------------------------------- */
+/* ---------------- HTTPS Handler ---------------- */
+
 static enum MHD_Result handle_post(void *cls,
                                    struct MHD_Connection *connection,
                                    const char *url,
@@ -150,8 +211,8 @@ static enum MHD_Result handle_post(void *cls,
     extract_move_dir(ci->data, move_dir);
 
     if (strlen(move_dir) > 0) {
-        printf("Parsed move_dir: %s\n", move_dir);
-        process_move(move_dir);
+        printf("Queued move_dir: %s\n", move_dir);
+        enqueue_move(move_dir);  // ✅ QUEUE INSTEAD OF EXECUTE
     } else {
         printf("move_dir not found\n");
     }
@@ -162,12 +223,11 @@ static enum MHD_Result handle_post(void *cls,
 
     return respond_json(connection,
                         MHD_HTTP_OK,
-                        "{\"status\":\"success\"}");
+                        "{\"status\":\"queued\"}");
 }
 
-/* --------------------------------------------------
-   Load TLS files
--------------------------------------------------- */
+/* ---------------- TLS ---------------- */
+
 static char *load_file(const char *filename)
 {
     FILE *f = fopen(filename, "r");
@@ -185,9 +245,8 @@ static char *load_file(const char *filename)
     return buf;
 }
 
-/* --------------------------------------------------
-   MAIN
--------------------------------------------------- */
+/* ---------------- MAIN ---------------- */
+
 int main()
 {
     char *cert = load_file("certs/server.crt");
@@ -197,6 +256,10 @@ int main()
         printf("Failed to load TLS files\n");
         return 1;
     }
+
+    // START WORKER THREAD
+    pthread_t tid;
+    pthread_create(&tid, NULL, worker, NULL);
 
     struct MHD_Daemon *daemon =
         MHD_start_daemon(
