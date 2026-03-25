@@ -2,7 +2,6 @@
 
 A real-time monitoring dashboard for the Maze Pupper 2 robotics system, featuring live network status, service monitoring, and interactive maze visualization.
 
-![Dashboard Preview](https://via.placeholder.com/800x400/0a1a25/0ff?text=Maze+Pupper+Dashboard)
 
 ## Overview
 
