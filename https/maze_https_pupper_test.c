@@ -58,9 +58,8 @@ void publish_velocity(float linear, float angular)
     char cmd[1024];
 
     snprintf(cmd, sizeof(cmd),
-        "bash -c 'source /opt/ros/humble/setup.bash && "
         "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: %.2f}}\"'",
+        "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: %.2f}}\"",
         linear, angular);
 
     printf("Executing command:\n%s\n", cmd);
