@@ -4,12 +4,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <time.h>
 
 #define PORT 8449
 
 /* ---------------- Queue ---------------- */
-
 typedef struct Move {
     char dir[32];
     struct Move *next;
@@ -20,14 +18,12 @@ Move *tail = NULL;
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------------- Connection ---------------- */
-
 struct connection_info {
     char *data;
     size_t size;
 };
 
 /* ---------------- Response ---------------- */
-
 static enum MHD_Result respond_json(struct MHD_Connection *connection,
                                     unsigned int status,
                                     const char *body)
@@ -43,33 +39,30 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
 }
 
 /* ---------------- Movement ---------------- */
-
 void publish_velocity(float linear, float angular)
 {
-    time_t start = time(NULL);
+    printf("Executing move for 3 seconds: linear=%.2f, angular=%.2f\n", linear, angular);
 
-    printf("Executing move for 3 seconds: linear=%.2f, angular=%.2f\n",
-           linear, angular);
-
-    while (difftime(time(NULL), start) < 3.0) {
+    // Loop to approximate 3 seconds, publishing every 0.3s
+    for (int i = 0; i < 10; i++) {
         char cmd[512];
         snprintf(cmd, sizeof(cmd),
             "bash -c 'source /opt/ros/humble/setup.bash && "
             "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-            "'\"{\\'linear\\': {\\'x\\': %.2f}, \\'angular\\': {\\'z\\': %.2f}}\"''",
+            "\"{linear: {x: %.2f}, angular: {z: %.2f}}\"'",
             linear, angular);
         system(cmd);
-        usleep(200000); // 200ms between publishes
+        usleep(300000); // 0.3 seconds
     }
 
     // Stop the robot
-    printf("Stopping robot\n");
-    char stop_cmd[512];
-    snprintf(stop_cmd, sizeof(stop_cmd),
+    char stop[512];
+    snprintf(stop, sizeof(stop),
         "bash -c 'source /opt/ros/humble/setup.bash && "
         "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "'\"{\\'linear\\': {\\'x\\': 0.0}, \\'angular\\': {\\'z\\': 0.0}}\"''");
-    system(stop_cmd);
+        "\"{linear: {x: 0.0}, angular: {z: 0.0}}\"'");
+    system(stop);
+    printf("Move complete, robot should have stopped.\n");
 }
 
 void process_move(const char *dir)
@@ -82,9 +75,9 @@ void process_move(const char *dir)
     else if (strcmp(dir, "backward") == 0)
         linear = -0.1;
     else if (strcmp(dir, "left") == 0)
-        angular = 0.5;
+        angular = 0.2;
     else if (strcmp(dir, "right") == 0)
-        angular = -0.5;
+        angular = -0.2;
     else {
         printf("Invalid direction: %s\n", dir);
         return;
@@ -94,7 +87,6 @@ void process_move(const char *dir)
 }
 
 /* ---------------- Queue Logic ---------------- */
-
 void enqueue_move(const char *dir)
 {
     Move *m = malloc(sizeof(Move));
@@ -124,7 +116,6 @@ Move* dequeue_move()
 }
 
 /* ---------------- Worker Thread ---------------- */
-
 void *worker(void *arg)
 {
     while (1) {
@@ -134,32 +125,34 @@ void *worker(void *arg)
             process_move(m->dir);
             free(m);
         } else {
-            usleep(100000); // 100ms idle
+            usleep(100000); // 100ms
         }
     }
     return NULL;
 }
 
 /* ---------------- JSON Parsing ---------------- */
-
 void extract_move_dir(const char *json, char *out)
 {
     char *key = strstr(json, "\"move_dir\"");
     if (!key) return;
+
     char *colon = strchr(key, ':');
     if (!colon) return;
+
     char *first_quote = strchr(colon, '\"');
     if (!first_quote) return;
     first_quote++;
+
     char *second_quote = strchr(first_quote, '\"');
     if (!second_quote) return;
+
     size_t len = second_quote - first_quote;
     strncpy(out, first_quote, len);
     out[len] = '\0';
 }
 
 /* ---------------- HTTPS Handler ---------------- */
-
 static enum MHD_Result handle_post(void *cls,
                                    struct MHD_Connection *connection,
                                    const char *url,
@@ -173,12 +166,14 @@ static enum MHD_Result handle_post(void *cls,
         return MHD_NO;
 
     if (*con_cls == NULL) {
-        struct connection_info *ci = calloc(1, sizeof(struct connection_info));
+        struct connection_info *ci =
+            calloc(1, sizeof(struct connection_info));
         *con_cls = ci;
         return MHD_YES;
     }
 
-    struct connection_info *ci = (struct connection_info *)*con_cls;
+    struct connection_info *ci =
+        (struct connection_info *)*con_cls;
 
     if (*upload_data_size != 0) {
         ci->data = realloc(ci->data, ci->size + *upload_data_size + 1);
@@ -190,6 +185,7 @@ static enum MHD_Result handle_post(void *cls,
     }
 
     printf("Received JSON:\n%s\n", ci->data);
+
     char move_dir[64] = {0};
     extract_move_dir(ci->data, move_dir);
 
@@ -207,24 +203,25 @@ static enum MHD_Result handle_post(void *cls,
     return respond_json(connection, MHD_HTTP_OK, "{\"status\":\"queued\"}");
 }
 
-/* ---------------- TLS ---------------- */
-
+/* ---------------- TLS Loader ---------------- */
 static char *load_file(const char *filename)
 {
     FILE *f = fopen(filename, "r");
     if (!f) return NULL;
+
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
+
     char *buf = malloc(len + 1);
     fread(buf, 1, len, f);
     buf[len] = '\0';
+
     fclose(f);
     return buf;
 }
 
 /* ---------------- MAIN ---------------- */
-
 int main()
 {
     char *cert = load_file("certs/server.crt");
@@ -240,7 +237,8 @@ int main()
 
     struct MHD_Daemon *daemon =
         MHD_start_daemon(
-            MHD_USE_THREAD_PER_CONNECTION | MHD_USE_TLS,
+            MHD_USE_THREAD_PER_CONNECTION |
+            MHD_USE_TLS,
             PORT,
             NULL, NULL,
             &handle_post, NULL,
@@ -255,8 +253,7 @@ int main()
 
     printf("Mini Pupper HTTPS control running at:\nhttps://localhost:%d\n", PORT);
 
-    while (1)
-        sleep(1);
+    while (1) sleep(1);
 
     MHD_stop_daemon(daemon);
     free(cert);
