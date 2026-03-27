@@ -3,27 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 
 #define PORT 8449
 
-/* ---------------- Queue ---------------- */
-typedef struct Move {
-    char dir[32];
-    struct Move *next;
-} Move;
-
-Move *head = NULL;
-Move *tail = NULL;
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-
-/* ---------------- Connection ---------------- */
 struct connection_info {
     char *data;
     size_t size;
 };
 
-/* ---------------- Response ---------------- */
 static enum MHD_Result respond_json(struct MHD_Connection *connection,
                                     unsigned int status,
                                     const char *body)
@@ -32,109 +19,18 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
         MHD_create_response_from_buffer(strlen(body),
                                         (void *)body,
                                         MHD_RESPMEM_MUST_COPY);
+
+    if (!resp)
+        return MHD_NO;
+
     MHD_add_response_header(resp, "Content-Type", "application/json");
-    enum MHD_Result ret =
-        MHD_queue_response(connection, status, resp);
+
+    enum MHD_Result ret = MHD_queue_response(connection, status, resp);
     MHD_destroy_response(resp);
     return ret;
 }
 
-/* ---------------- Movement ---------------- */
-void publish_velocity(float linear, float angular)
-{
-    printf("Executing move for 5 seconds: linear=%.2f, angular=%.2f\n", linear, angular);
-
-    // 1️⃣ Publish move command once
-    char move_cmd[512];
-    snprintf(move_cmd, sizeof(move_cmd),
-        "bash -c 'source /opt/ros/humble/setup.bash && "
-        "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: %.2f}, angular: {z: %.2f}}\"'",
-        linear, angular);
-    system(move_cmd);
-
-    // 2️⃣ Wait 5 seconds while robot moves
-    sleep(5);
-
-    // 3️⃣ Publish stop command continuously at 5 Hz for 1 second
-    char stop_cmd[512];
-    snprintf(stop_cmd, sizeof(stop_cmd),
-        "bash -c 'source /opt/ros/humble/setup.bash && "
-        "timeout 1 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: 0.0}, angular: {z: 0.0}}\" -r 5'");
-    system(stop_cmd);
-
-    printf("Move complete, robot should have stopped.\n");
-}
-
-void process_move(const char *dir)
-{
-    float linear = 0.0;
-    float angular = 0.0;
-
-    if (strcmp(dir, "forward") == 0)
-        linear = 0.1;
-    else if (strcmp(dir, "backward") == 0)
-        linear = -0.1;
-    else if (strcmp(dir, "left") == 0)
-        angular = 0.2;
-    else if (strcmp(dir, "right") == 0)
-        angular = -0.2;
-    else {
-        printf("Invalid direction: %s\n", dir);
-        return;
-    }
-
-    publish_velocity(linear, angular);
-}
-
-/* ---------------- Queue Logic ---------------- */
-void enqueue_move(const char *dir)
-{
-    Move *m = malloc(sizeof(Move));
-    strcpy(m->dir, dir);
-    m->next = NULL;
-
-    pthread_mutex_lock(&lock);
-    if (!tail)
-        head = tail = m;
-    else {
-        tail->next = m;
-        tail = m;
-    }
-    pthread_mutex_unlock(&lock);
-}
-
-Move* dequeue_move()
-{
-    pthread_mutex_lock(&lock);
-    Move *m = head;
-    if (m) {
-        head = head->next;
-        if (!head) tail = NULL;
-    }
-    pthread_mutex_unlock(&lock);
-    return m;
-}
-
-/* ---------------- Worker Thread ---------------- */
-void *worker(void *arg)
-{
-    while (1) {
-        Move *m = dequeue_move();
-        if (m) {
-            printf("Processing queued move: %s\n", m->dir);
-            process_move(m->dir);
-            free(m);
-        } else {
-            usleep(100000); // 100ms
-        }
-    }
-    return NULL;
-}
-
-/* ---------------- JSON Parsing ---------------- */
-void extract_move_dir(const char *json, char *out)
+void extract_move_dir(const char *json, char *out, size_t out_size)
 {
     char *key = strstr(json, "\"move_dir\"");
     if (!key) return;
@@ -150,11 +46,53 @@ void extract_move_dir(const char *json, char *out)
     if (!second_quote) return;
 
     size_t len = second_quote - first_quote;
+    if (len >= out_size)
+        len = out_size - 1;
+
     strncpy(out, first_quote, len);
     out[len] = '\0';
 }
 
-/* ---------------- HTTPS Handler ---------------- */
+void publish_velocity(float linear, float angular)
+{
+    char cmd[1024];
+
+    snprintf(cmd, sizeof(cmd),
+        "bash -c 'source /opt/ros/humble/setup.bash && "
+        "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
+        "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: %.2f}}\"'",
+        linear, angular);
+
+    printf("Executing command:\n%s\n", cmd);
+    int ret = system(cmd);
+    printf("system() returned: %d\n", ret);
+}
+
+int process_move(const char *dir)
+{
+    float linear = 0.0f;
+    float angular = 0.0f;
+
+    if (strcmp(dir, "forward") == 0) {
+        linear = 0.1f;
+    } else if (strcmp(dir, "backward") == 0) {
+        linear = -0.1f;
+    } else if (strcmp(dir, "left") == 0) {
+        angular = 0.2f;
+    } else if (strcmp(dir, "right") == 0) {
+        angular = -0.2f;
+    } else if (strcmp(dir, "stop") == 0) {
+        linear = 0.0f;
+        angular = 0.0f;
+    } else {
+        printf("Invalid direction: %s\n", dir);
+        return 0;
+    }
+
+    publish_velocity(linear, angular);
+    return 1;
+}
+
 static enum MHD_Result handle_post(void *cls,
                                    struct MHD_Connection *connection,
                                    const char *url,
@@ -164,12 +102,19 @@ static enum MHD_Result handle_post(void *cls,
                                    size_t *upload_data_size,
                                    void **con_cls)
 {
-    if (strcmp(method, "POST") != 0)
-        return MHD_NO;
+    (void)cls;
+    (void)url;
+    (void)version;
+
+    if (strcmp(method, "POST") != 0) {
+        return respond_json(connection, MHD_HTTP_METHOD_NOT_ALLOWED,
+                            "{\"error\":\"POST only\"}");
+    }
 
     if (*con_cls == NULL) {
-        struct connection_info *ci =
-            calloc(1, sizeof(struct connection_info));
+        struct connection_info *ci = calloc(1, sizeof(struct connection_info));
+        if (!ci)
+            return MHD_NO;
         *con_cls = ci;
         return MHD_YES;
     }
@@ -177,62 +122,82 @@ static enum MHD_Result handle_post(void *cls,
     struct connection_info *ci = (struct connection_info *)*con_cls;
 
     if (*upload_data_size != 0) {
-        ci->data = realloc(ci->data, ci->size + *upload_data_size + 1);
+        char *new_data = realloc(ci->data, ci->size + *upload_data_size + 1);
+        if (!new_data) {
+            free(ci->data);
+            free(ci);
+            *con_cls = NULL;
+            return MHD_NO;
+        }
+
+        ci->data = new_data;
         memcpy(ci->data + ci->size, upload_data, *upload_data_size);
         ci->size += *upload_data_size;
         ci->data[ci->size] = '\0';
+
         *upload_data_size = 0;
         return MHD_YES;
     }
 
-    printf("Received JSON:\n%s\n", ci->data);
+    printf("Received JSON:\n%s\n", ci->data ? ci->data : "(null)");
 
     char move_dir[64] = {0};
-    extract_move_dir(ci->data, move_dir);
-
-    if (strlen(move_dir) > 0) {
-        printf("Queued move_dir: %s\n", move_dir);
-        enqueue_move(move_dir);
-    } else {
-        printf("move_dir not found\n");
-    }
+    if (ci->data)
+        extract_move_dir(ci->data, move_dir, sizeof(move_dir));
 
     free(ci->data);
     free(ci);
     *con_cls = NULL;
 
-    return respond_json(connection,
-                        MHD_HTTP_OK,
-                        "{\"status\":\"queued\"}");
+    if (strlen(move_dir) == 0) {
+        return respond_json(connection, MHD_HTTP_BAD_REQUEST,
+                            "{\"error\":\"move_dir not found\"}");
+    }
+
+    printf("move_dir: %s\n", move_dir);
+
+    if (!process_move(move_dir)) {
+        return respond_json(connection, MHD_HTTP_BAD_REQUEST,
+                            "{\"error\":\"invalid move_dir\"}");
+    }
+
+    return respond_json(connection, MHD_HTTP_OK,
+                        "{\"status\":\"executed\"}");
 }
 
-/* ---------------- TLS ---------------- */
 static char *load_file(const char *filename)
 {
     FILE *f = fopen(filename, "r");
-    if (!f) return NULL;
+    if (!f)
+        return NULL;
+
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
+
     char *buf = malloc(len + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+
     fread(buf, 1, len, f);
     buf[len] = '\0';
     fclose(f);
     return buf;
 }
 
-/* ---------------- MAIN ---------------- */
-int main()
+int main(void)
 {
     char *cert = load_file("certs/server.crt");
     char *key  = load_file("certs/server.key");
+
     if (!cert || !key) {
         printf("Failed to load TLS files\n");
+        free(cert);
+        free(key);
         return 1;
     }
-
-    pthread_t tid;
-    pthread_create(&tid, NULL, worker, NULL);
 
     struct MHD_Daemon *daemon =
         MHD_start_daemon(
@@ -246,6 +211,8 @@ int main()
 
     if (!daemon) {
         printf("Failed to start HTTPS server\n");
+        free(cert);
+        free(key);
         return 1;
     }
 
