@@ -58,7 +58,7 @@ void publish_velocity(float linear, float angular)
     char cmd[1024];
 
     snprintf(cmd, sizeof(cmd),
-        "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
+        "ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "
         "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: %.2f}}\"",
         linear, angular);
 
