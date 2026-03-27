@@ -33,7 +33,8 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
                                         (void *)body,
                                         MHD_RESPMEM_MUST_COPY);
     MHD_add_response_header(resp, "Content-Type", "application/json");
-    enum MHD_Result ret = MHD_queue_response(connection, status, resp);
+    enum MHD_Result ret =
+        MHD_queue_response(connection, status, resp);
     MHD_destroy_response(resp);
     return ret;
 }
@@ -41,27 +42,28 @@ static enum MHD_Result respond_json(struct MHD_Connection *connection,
 /* ---------------- Movement ---------------- */
 void publish_velocity(float linear, float angular)
 {
-    printf("Executing move for 3 seconds: linear=%.2f, angular=%.2f\n", linear, angular);
+    printf("Executing move for 5 seconds: linear=%.2f, angular=%.2f\n", linear, angular);
 
-    // Loop to approximate 3 seconds, publishing every 0.3s
-    for (int i = 0; i < 10; i++) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd),
-            "bash -c 'source /opt/ros/humble/setup.bash && "
-            "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-            "\"{linear: {x: %.2f}, angular: {z: %.2f}}\"'",
-            linear, angular);
-        system(cmd);
-        usleep(300000); // 0.3 seconds
-    }
-
-    // Stop the robot
-    char stop[512];
-    snprintf(stop, sizeof(stop),
+    // 1️⃣ Publish move command once
+    char move_cmd[512];
+    snprintf(move_cmd, sizeof(move_cmd),
         "bash -c 'source /opt/ros/humble/setup.bash && "
         "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: 0.0}, angular: {z: 0.0}}\"'");
-    system(stop);
+        "\"{linear: {x: %.2f}, angular: {z: %.2f}}\"'",
+        linear, angular);
+    system(move_cmd);
+
+    // 2️⃣ Wait 5 seconds while robot moves
+    sleep(5);
+
+    // 3️⃣ Publish stop command continuously at 5 Hz for 1 second
+    char stop_cmd[512];
+    snprintf(stop_cmd, sizeof(stop_cmd),
+        "bash -c 'source /opt/ros/humble/setup.bash && "
+        "timeout 1 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
+        "\"{linear: {x: 0.0}, angular: {z: 0.0}}\" -r 5'");
+    system(stop_cmd);
+
     printf("Move complete, robot should have stopped.\n");
 }
 
@@ -172,8 +174,7 @@ static enum MHD_Result handle_post(void *cls,
         return MHD_YES;
     }
 
-    struct connection_info *ci =
-        (struct connection_info *)*con_cls;
+    struct connection_info *ci = (struct connection_info *)*con_cls;
 
     if (*upload_data_size != 0) {
         ci->data = realloc(ci->data, ci->size + *upload_data_size + 1);
@@ -200,23 +201,22 @@ static enum MHD_Result handle_post(void *cls,
     free(ci);
     *con_cls = NULL;
 
-    return respond_json(connection, MHD_HTTP_OK, "{\"status\":\"queued\"}");
+    return respond_json(connection,
+                        MHD_HTTP_OK,
+                        "{\"status\":\"queued\"}");
 }
 
-/* ---------------- TLS Loader ---------------- */
+/* ---------------- TLS ---------------- */
 static char *load_file(const char *filename)
 {
     FILE *f = fopen(filename, "r");
     if (!f) return NULL;
-
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-
     char *buf = malloc(len + 1);
     fread(buf, 1, len, f);
     buf[len] = '\0';
-
     fclose(f);
     return buf;
 }
@@ -226,7 +226,6 @@ int main()
 {
     char *cert = load_file("certs/server.crt");
     char *key  = load_file("certs/server.key");
-
     if (!cert || !key) {
         printf("Failed to load TLS files\n");
         return 1;
@@ -237,8 +236,7 @@ int main()
 
     struct MHD_Daemon *daemon =
         MHD_start_daemon(
-            MHD_USE_THREAD_PER_CONNECTION |
-            MHD_USE_TLS,
+            MHD_USE_THREAD_PER_CONNECTION | MHD_USE_TLS,
             PORT,
             NULL, NULL,
             &handle_post, NULL,
@@ -251,9 +249,11 @@ int main()
         return 1;
     }
 
-    printf("Mini Pupper HTTPS control running at:\nhttps://localhost:%d\n", PORT);
+    printf("Mini Pupper HTTPS control running at:\n");
+    printf("https://localhost:%d\n", PORT);
 
-    while (1) sleep(1);
+    while (1)
+        sleep(1);
 
     MHD_stop_daemon(daemon);
     free(cert);
