@@ -52,21 +52,13 @@ void publish_velocity(float linear, float angular)
 {
     char cmd[512];
 
+    // Publish at 5 Hz for 3 seconds
     snprintf(cmd, sizeof(cmd),
-        "timeout 3 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, "
-        "angular: {x: 0.0, y: 0.0, z: %.2f}}\"",
+        "ros2 topic pub -r 5 /cmd_vel geometry_msgs/msg/Twist "
+        "'{linear: {x: %.2f}, angular: {z: %.2f}}' & pid=$!; sleep 3; kill $pid",
         linear, angular);
 
     printf("Executing (3s move):\n%s\n", cmd);
-    system(cmd);
-
-    snprintf(cmd, sizeof(cmd),
-        "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: 0.0, y: 0.0, z: 0.0}, "
-        "angular: {x: 0.0, y: 0.0, z: 0.0}}\"");
-
-    printf("Stopping robot\n");
     system(cmd);
 }
 
@@ -76,13 +68,13 @@ void process_move(const char *dir)
     float angular = 0.0;
 
     if (strcmp(dir, "forward") == 0)
-        linear = 0.5;
+        linear = 0.1;          // adjusted to your example
     else if (strcmp(dir, "backward") == 0)
-        linear = -0.5;
+        linear = -0.1;
     else if (strcmp(dir, "left") == 0)
-        angular = 1.0;
+        angular = 0.1;
     else if (strcmp(dir, "right") == 0)
-        angular = -1.0;
+        angular = -0.1;
     else {
         printf("Invalid direction: %s\n", dir);
         return;
@@ -212,7 +204,7 @@ static enum MHD_Result handle_post(void *cls,
 
     if (strlen(move_dir) > 0) {
         printf("Queued move_dir: %s\n", move_dir);
-        enqueue_move(move_dir);  // ✅ QUEUE INSTEAD OF EXECUTE
+        enqueue_move(move_dir);
     } else {
         printf("move_dir not found\n");
     }
