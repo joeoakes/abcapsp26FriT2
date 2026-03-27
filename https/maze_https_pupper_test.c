@@ -54,12 +54,14 @@ void publish_velocity(float linear, float angular)
 
     // Publish at 5 Hz for 3 seconds
     snprintf(cmd, sizeof(cmd),
-        "ros2 topic pub -r 5 /cmd_vel geometry_msgs/msg/Twist "
-        "'{linear: {x: %.2f}, angular: {z: %.2f}}' & pid=$!; sleep 3; kill $pid",
+        "ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
+        "\"{linear: {x: %.2f}, angular: {z: %.2f}}\" -r 5 --duration 3",
         linear, angular);
 
-    printf("Executing (3s move):\n%s\n", cmd);
+    printf("Executing move (3s):\n%s\n", cmd);
     system(cmd);
+
+    printf("Move complete, robot should have stopped.\n");
 }
 
 void process_move(const char *dir)
@@ -68,13 +70,18 @@ void process_move(const char *dir)
     float angular = 0.0;
 
     if (strcmp(dir, "forward") == 0)
-        linear = 0.1;          // adjusted to your example
+        linear = 0.1;
     else if (strcmp(dir, "backward") == 0)
         linear = -0.1;
     else if (strcmp(dir, "left") == 0)
-        angular = 0.1;
+        angular = 0.5;
     else if (strcmp(dir, "right") == 0)
-        angular = -0.1;
+        angular = -0.5;
+    else if (strcmp(dir, "stop") == 0) {
+        // Stop command: publish zero once
+        linear = 0.0;
+        angular = 0.0;
+    }
     else {
         printf("Invalid direction: %s\n", dir);
         return;
