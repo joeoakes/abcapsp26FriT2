@@ -11,10 +11,7 @@
 #define CELL 32
 #define PAD 16
 
-/* Old maze logging endpoint */
-#define MOVE_URL "https://10.170.8.130:8448/move"
-
-/* New fast Mini Pupper endpoint */
+/* Mini Pupper fast HTTPS server */
 #define PUPPER_URL "https://localhost:8449/"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
@@ -29,18 +26,9 @@ typedef struct {
 } Node;
 
 static Cell g[MAZE_H][MAZE_W];
-
-static int level_index = 0;
 static int move_sequence = 0;
 
 /* ---------------- HTTPS ---------------- */
-
-static void iso_utc_now(char out[32]) {
-    time_t t = time(NULL);
-    struct tm tmv;
-    gmtime_r(&t, &tmv);
-    strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &tmv);
-}
 
 static int https_post_json(const char *url, const char *json) {
     CURL *curl = curl_easy_init();
@@ -58,36 +46,25 @@ static int https_post_json(const char *url, const char *json) {
 
     CURLcode res = curl_easy_perform(curl);
 
+    if (res != CURLE_OK) {
+        fprintf(stderr, "curl error: %s\n", curl_easy_strerror(res));
+    }
+
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
     return (res == CURLE_OK);
 }
 
-static void send_event(const char *type, int x, int y, bool goal) {
-    char ts[32];
-    iso_utc_now(ts);
-
-    char json[512];
-    snprintf(json, sizeof(json),
-        "{\"event_type\":\"%s\",\"level\":%d,"
-        "\"input\":{\"device\":\"keyboard\",\"move_sequence\":%d},"
-        "\"player\":{\"position\":{\"x\":%d,\"y\":%d}},"
-        "\"goal_reached\":%s,"
-        "\"timestamp\":\"%s\"}",
-        type, level_index, move_sequence, x, y,
-        goal ? "true" : "false", ts);
-
-    https_post_json(MOVE_URL, json);
-}
-
 static void send_pupper_move(const char *dir) {
     char json[128];
     snprintf(json, sizeof(json), "{\"move_dir\":\"%s\"}", dir);
+
+    printf("Sending to pupper: %s\n", json);
     https_post_json(PUPPER_URL, json);
 }
 
-/* ---------------- Maze Generation ---------------- */
+/* ---------------- Maze Helpers ---------------- */
 
 static inline bool in_bounds(int x, int y) {
     return x >= 0 && x < MAZE_W && y >= 0 && y < MAZE_H;
@@ -109,7 +86,7 @@ static void knock_down(int x, int y, int nx, int ny) {
     }
 }
 
-static void maze_init() {
+static void maze_init(void) {
     for (int y = 0; y < MAZE_H; y++) {
         for (int x = 0; x < MAZE_W; x++) {
             g[y][x].walls = WALL_N | WALL_E | WALL_S | WALL_W;
@@ -153,6 +130,27 @@ static void maze_generate(int sx, int sy) {
         g[next.y][next.x].visited = true;
         stack[top++] = next;
     }
+}
+
+static bool try_move(int *px, int *py, int dx, int dy) {
+    int x = *px;
+    int y = *py;
+    int nx = x + dx;
+    int ny = y + dy;
+
+    if (!in_bounds(nx, ny)) return false;
+
+    uint8_t w = g[y][x].walls;
+    if ((dx == 0 && dy == -1 && (w & WALL_N)) ||
+        (dx == 1 && dy == 0 && (w & WALL_E)) ||
+        (dx == 0 && dy == 1 && (w & WALL_S)) ||
+        (dx == -1 && dy == 0 && (w & WALL_W))) {
+        return false;
+    }
+
+    *px = nx;
+    *py = ny;
+    return true;
 }
 
 /* ---------------- A* Solver ---------------- */
@@ -276,53 +274,31 @@ static void draw(SDL_Renderer *r, int px, int py) {
         }
     }
 
-    SDL_Rect gl = {
+    SDL_Rect goal = {
         PAD + (MAZE_W - 1) * CELL + 6,
         PAD + (MAZE_H - 1) * CELL + 6,
         CELL - 12,
         CELL - 12
     };
     SDL_SetRenderDrawColor(r, 40, 160, 70, 255);
-    SDL_RenderFillRect(r, &gl);
+    SDL_RenderFillRect(r, &goal);
 
-    SDL_Rect p = {
+    SDL_Rect player = {
         PAD + px * CELL + 8,
         PAD + py * CELL + 8,
         CELL - 16,
         CELL - 16
     };
     SDL_SetRenderDrawColor(r, 255, 215, 0, 255);
-    SDL_RenderFillRect(r, &p);
+    SDL_RenderFillRect(r, &player);
 
     SDL_RenderPresent(r);
 }
 
-static bool try_move(int *px, int *py, int dx, int dy) {
-    int x = *px;
-    int y = *py;
-    int nx = x + dx;
-    int ny = y + dy;
-
-    if (!in_bounds(nx, ny)) return false;
-
-    uint8_t w = g[y][x].walls;
-    if ((dx == 0 && dy == -1 && (w & WALL_N)) ||
-        (dx == 1 && dy == 0 && (w & WALL_E)) ||
-        (dx == 0 && dy == 1 && (w & WALL_S)) ||
-        (dx == -1 && dy == 0 && (w & WALL_W))) {
-        return false;
-    }
-
-    *px = nx;
-    *py = ny;
-    return true;
-}
-
 /* ---------------- Main ---------------- */
 
-int main() {
-    srand(time(NULL));
-
+int main(void) {
+    srand((unsigned int)time(NULL));
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -331,7 +307,7 @@ int main() {
     }
 
     SDL_Window *win = SDL_CreateWindow(
-        "Mini Pupper A*",
+        "Maze + Mini Pupper Control",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         PAD * 2 + MAZE_W * CELL,
@@ -386,58 +362,67 @@ int main() {
                     send_pupper_move("stop");
                 }
 
-                /* AUTO SOLVER */
+                /* Solve whole path and send every move */
                 if (k == SDLK_p) {
                     Node path[MAZE_W * MAZE_H];
                     int len = astar(path, px, py);
 
-                    for (int i = 1; i < len; i++) {
-                        int oldx = px;
-                        int oldy = py;
+                    if (len > 0) {
+                        for (int i = 1; i < len; i++) {
+                            int oldx = px;
+                            int oldy = py;
 
-                        px = path[i].x;
-                        py = path[i].y;
-                        move_sequence++;
+                            px = path[i].x;
+                            py = path[i].y;
+                            move_sequence++;
 
-                        bool goal = (px == MAZE_W - 1 && py == MAZE_H - 1);
-                        send_event("astar_move", px, py, goal);
+                            if (py < oldy) {
+                                send_pupper_move("forward");
+                            } else if (py > oldy) {
+                                send_pupper_move("backward");
+                            } else if (px < oldx) {
+                                send_pupper_move("left");
+                            } else if (px > oldx) {
+                                send_pupper_move("right");
+                            }
 
-                        if (py < oldy) send_pupper_move("forward");
-                        else if (py > oldy) send_pupper_move("backward");
-                        else if (px < oldx) send_pupper_move("left");
-                        else if (px > oldx) send_pupper_move("right");
+                            draw(r, px, py);
+                            SDL_Delay(120);
+                        }
 
-                        draw(r, px, py);
-                        SDL_Delay(60);
+                        send_pupper_move("stop");
                     }
                 }
 
-                /* MANUAL MOVES */
+                /* Manual WASD / arrows */
                 int dx = 0;
                 int dy = 0;
 
-                if (k == SDLK_UP || k == SDLK_w) dy = -1;
-                else if (k == SDLK_DOWN || k == SDLK_s) dy = 1;
-                else if (k == SDLK_LEFT || k == SDLK_a) dx = -1;
-                else if (k == SDLK_RIGHT || k == SDLK_d) dx = 1;
+                if (k == SDLK_w || k == SDLK_UP) dy = -1;
+                else if (k == SDLK_s || k == SDLK_DOWN) dy = 1;
+                else if (k == SDLK_a || k == SDLK_LEFT) dx = -1;
+                else if (k == SDLK_d || k == SDLK_RIGHT) dx = 1;
 
                 if (dx != 0 || dy != 0) {
                     if (try_move(&px, &py, dx, dy)) {
                         move_sequence++;
-                        bool goal = (px == MAZE_W - 1 && py == MAZE_H - 1);
 
-                        send_event("player_move", px, py, goal);
-
-                        if (dy == -1) send_pupper_move("forward");
-                        else if (dy == 1) send_pupper_move("backward");
-                        else if (dx == -1) send_pupper_move("left");
-                        else if (dx == 1) send_pupper_move("right");
+                        if (dy == -1) {
+                            send_pupper_move("forward");
+                        } else if (dy == 1) {
+                            send_pupper_move("backward");
+                        } else if (dx == -1) {
+                            send_pupper_move("left");
+                        } else if (dx == 1) {
+                            send_pupper_move("right");
+                        }
                     }
                 }
             }
         }
 
         draw(r, px, py);
+        SDL_Delay(16);
     }
 
     SDL_DestroyRenderer(r);
