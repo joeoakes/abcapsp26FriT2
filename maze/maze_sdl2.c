@@ -11,8 +11,8 @@
 #define CELL 32
 #define PAD 16
 
-/* Mini Pupper fast HTTPS server */
-#define PUPPER_URL "https://localhost:8449/"
+/* CHANGE THIS TO YOUR MINI PUPPER IP */
+#define PUPPER_URL "https://10.170.8.119:8449/"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
@@ -59,7 +59,6 @@ static int https_post_json(const char *url, const char *json) {
 static void send_pupper_move(const char *dir) {
     char json[128];
     snprintf(json, sizeof(json), "{\"move_dir\":\"%s\"}", dir);
-
     printf("Sending to pupper: %s\n", json);
     https_post_json(PUPPER_URL, json);
 }
@@ -362,7 +361,14 @@ int main(void) {
                     send_pupper_move("stop");
                 }
 
-                /* Solve whole path and send every move */
+                if (k == SDLK_q) {
+                    send_pupper_move("up");
+                }
+
+                if (k == SDLK_e) {
+                    send_pupper_move("down");
+                }
+
                 if (k == SDLK_p) {
                     Node path[MAZE_W * MAZE_H];
                     int len = astar(path, px, py);
@@ -394,7 +400,6 @@ int main(void) {
                     }
                 }
 
-                /* Manual WASD / arrows */
                 int dx = 0;
                 int dy = 0;
 
