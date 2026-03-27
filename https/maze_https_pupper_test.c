@@ -54,19 +54,19 @@ void publish_velocity(float linear, float angular)
 
     // Move for 3 seconds
     snprintf(cmd, sizeof(cmd),
-        "bash -c 'source /opt/ros/humble/setup.bash && "
-        "timeout 3 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: %.2f}, angular: {z: %.2f}}\" -r 5'",
-        linear, angular);
+    "bash -c 'source /opt/ros/humble/setup.bash && "
+    "timeout 3 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "
+    "\"{linear: {x: %.2f, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: %.2f}}\" -r 5'",
+    linear, angular);
 
     printf("Executing (3s move):\n%s\n", cmd);
     system(cmd);
 
     // Stop robot
     snprintf(cmd, sizeof(cmd),
-        "bash -c 'source /opt/ros/humble/setup.bash && "
-        "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
-        "\"{linear: {x: 0.0}, angular: {z: 0.0}}\"'");
+    "bash -c 'source /opt/ros/humble/setup.bash && "
+    "ros2 topic pub -1 /cmd_vel geometry_msgs/msg/Twist "
+    "\"{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}\"'");
 
     printf("Stopping robot\n");
     system(cmd);
