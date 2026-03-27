@@ -11,10 +11,10 @@
 #define CELL 32
 #define PAD 16
 
-// ROBOT CONTROL ENDPOINT (FIXED PORT)
+// ROBOT CONTROL ENDPOINT
 #define ROBOT_URL "https://10.170.8.130:8449"
 
-// LOGGING ENDPOINT (keep if you want)
+// LOGGING ENDPOINT
 #define MOVE_URL "https://10.170.8.130:8448/move"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
@@ -44,7 +44,6 @@ static int https_post_json(const char *url, const char *json) {
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json);
 
-    // Allow self-signed cert
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
 
@@ -56,7 +55,6 @@ static int https_post_json(const char *url, const char *json) {
     return (res == CURLE_OK);
 }
 
-/* ---------------- SEND ROBOT COMMAND ---------------- */
 void send_move_command(const char *dir)
 {
     char json[128];
@@ -137,80 +135,46 @@ static void maze_generate(int sx, int sy) {
     }
 }
 
-/* ---------------- A* ---------------- */
+/* ---------------- Movement & Drawing ---------------- */
 
-static int heuristic(int x, int y) {
-    return abs(x - (MAZE_W - 1)) + abs(y - (MAZE_H - 1));
+bool try_move(int *px, int *py, int dx, int dy) {
+    int nx = *px + dx;
+    int ny = *py + dy;
+    if (!in_bounds(nx, ny)) return false;
+
+    if (dx == 1 && (g[*py][*px].walls & WALL_E)) return false;
+    if (dx == -1 && (g[*py][*px].walls & WALL_W)) return false;
+    if (dy == 1 && (g[*py][*px].walls & WALL_S)) return false;
+    if (dy == -1 && (g[*py][*px].walls & WALL_N)) return false;
+
+    *px = nx;
+    *py = ny;
+    return true;
 }
 
-static int astar(Node path[MAZE_W * MAZE_H], int sx, int sy) {
-    typedef struct { int g, f, p; bool c; } N;
-    N n[MAZE_W * MAZE_H];
+void draw(SDL_Renderer *r, int px, int py) {
+    SDL_SetRenderDrawColor(r, 0,0,0,255);
+    SDL_RenderClear(r);
 
-    for (int i = 0; i < MAZE_W * MAZE_H; i++) {
-        n[i].g = 999999; n[i].f = 999999; n[i].p = -1; n[i].c = false;
-    }
-
-    int open[MAZE_W * MAZE_H], oc = 0;
-    int s = sy * MAZE_W + sx;
-
-    n[s].g = 0;
-    n[s].f = heuristic(sx, sy);
-    open[oc++] = s;
-
-    int goal = (MAZE_H - 1) * MAZE_W + (MAZE_W - 1);
-
-    while (oc > 0) {
-        int best = 0;
-        for (int i = 1; i < oc; i++)
-            if (n[open[i]].f < n[open[best]].f) best = i;
-
-        int cur = open[best];
-        open[best] = open[--oc];
-
-        if (cur == goal) break;
-
-        n[cur].c = true;
-
-        int cx = cur % MAZE_W, cy = cur / MAZE_W;
-
-        int dx[4] = {0,1,0,-1}, dy[4] = {-1,0,1,0};
-        uint8_t m[4] = {WALL_N, WALL_E, WALL_S, WALL_W};
-
-        for (int d = 0; d < 4; d++) {
-            int nx = cx + dx[d], ny = cy + dy[d];
-
-            if (!in_bounds(nx, ny) || (g[cy][cx].walls & m[d])) continue;
-
-            int ni = ny * MAZE_W + nx;
-
-            if (n[ni].c) continue;
-
-            int ng = n[cur].g + 1;
-
-            if (ng < n[ni].g) {
-                n[ni].g = ng;
-                n[ni].f = ng + heuristic(nx, ny);
-                n[ni].p = cur;
-                open[oc++] = ni;
-            }
+    // draw maze
+    for (int y=0; y<MAZE_H; y++) {
+        for (int x=0; x<MAZE_W; x++) {
+            int ox = PAD + x*CELL;
+            int oy = PAD + y*CELL;
+            SDL_SetRenderDrawColor(r,255,255,255,255);
+            if (g[y][x].walls & WALL_N) SDL_RenderDrawLine(r, ox, oy, ox+CELL, oy);
+            if (g[y][x].walls & WALL_S) SDL_RenderDrawLine(r, ox, oy+CELL, ox+CELL, oy+CELL);
+            if (g[y][x].walls & WALL_W) SDL_RenderDrawLine(r, ox, oy, ox, oy+CELL);
+            if (g[y][x].walls & WALL_E) SDL_RenderDrawLine(r, ox+CELL, oy, ox+CELL, oy+CELL);
         }
     }
 
-    int idx = goal, len = 0;
+    // draw robot
+    SDL_Rect robot = {PAD + px*CELL + CELL/4, PAD + py*CELL + CELL/4, CELL/2, CELL/2};
+    SDL_SetRenderDrawColor(r, 255,0,0,255);
+    SDL_RenderFillRect(r, &robot);
 
-    while (idx != -1) {
-        path[len++] = (Node){idx % MAZE_W, idx / MAZE_W};
-        idx = n[idx].p;
-    }
-
-    for (int i = 0; i < len / 2; i++) {
-        Node t = path[i];
-        path[i] = path[len - i - 1];
-        path[len - i - 1] = t;
-    }
-
-    return len;
+    SDL_RenderPresent(r);
 }
 
 /* ---------------- Main ---------------- */
@@ -246,7 +210,6 @@ int main() {
                 if (e.key.keysym.sym==SDLK_d || e.key.keysym.sym==SDLK_RIGHT) dx=1;
 
                 if (try_move(&px,&py,dx,dy)) {
-
                     if (dy==-1) send_move_command("forward");
                     if (dy==1) send_move_command("backward");
                     if (dx==-1) send_move_command("left");
