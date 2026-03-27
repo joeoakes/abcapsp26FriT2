@@ -32,7 +32,6 @@ static int level_index = 0;
 static int move_sequence = 0;
 
 /* ---------------- HTTPS ---------------- */
-
 static int https_post_json(const char *url, const char *json) {
     CURL *curl = curl_easy_init();
     if (!curl) return 0;
@@ -66,7 +65,6 @@ void send_move_command(const char *dir)
 }
 
 /* ---------------- LOGGING ---------------- */
-
 static void iso_utc_now(char out[32]) {
     time_t t = time(NULL);
     struct tm tmv;
@@ -88,7 +86,6 @@ static void send_event(const char *type, int x, int y, bool goal) {
 }
 
 /* ---------------- Maze ---------------- */
-
 static inline bool in_bounds(int x, int y) { return x >= 0 && x < MAZE_W && y >= 0 && y < MAZE_H; }
 
 static void knock_down(int x, int y, int nx, int ny) {
@@ -136,7 +133,6 @@ static void maze_generate(int sx, int sy) {
 }
 
 /* ---------------- Movement & Drawing ---------------- */
-
 bool try_move(int *px, int *py, int dx, int dy) {
     int nx = *px + dx;
     int ny = *py + dy;
@@ -178,17 +174,35 @@ void draw(SDL_Renderer *r, int px, int py) {
 }
 
 /* ---------------- Main ---------------- */
-
 int main() {
     srand(time(NULL));
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    SDL_Init(SDL_INIT_VIDEO);
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        fprintf(stderr, "curl_global_init failed\n");
+        return 1;
+    }
+
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        fprintf(stderr, "SDL_Init Error: %s\n", SDL_GetError());
+        return 1;
+    }
 
     SDL_Window *w = SDL_CreateWindow("Maze Robot",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         PAD*2 + MAZE_W*CELL, PAD*2 + MAZE_H*CELL, 0);
 
+    if (!w) {
+        fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
     SDL_Renderer *r = SDL_CreateRenderer(w, -1, SDL_RENDERER_ACCELERATED);
+    if (!r) {
+        fprintf(stderr, "SDL_CreateRenderer Error: %s\n", SDL_GetError());
+        SDL_DestroyWindow(w);
+        SDL_Quit();
+        return 1;
+    }
 
     maze_init();
     maze_generate(0,0);
@@ -225,6 +239,8 @@ int main() {
         draw(r,px,py);
     }
 
+    SDL_DestroyRenderer(r);
+    SDL_DestroyWindow(w);
     SDL_Quit();
     curl_global_cleanup();
     return 0;
