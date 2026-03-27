@@ -11,10 +11,17 @@
 #define CELL 32
 #define PAD 16
 
-/* CHANGE THIS TO YOUR MINI PUPPER IP */
+/* Mini Pupper fast HTTPS server */
 #define PUPPER_URL "https://10.170.8.119:8449/"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
+
+enum {
+    DIR_NORTH = 0,
+    DIR_EAST  = 1,
+    DIR_SOUTH = 2,
+    DIR_WEST  = 3
+};
 
 typedef struct {
     uint8_t walls;
@@ -27,6 +34,7 @@ typedef struct {
 
 static Cell g[MAZE_H][MAZE_W];
 static int move_sequence = 0;
+static int robot_heading = DIR_NORTH;
 
 /* ---------------- HTTPS ---------------- */
 
@@ -61,6 +69,51 @@ static void send_pupper_move(const char *dir) {
     snprintf(json, sizeof(json), "{\"move_dir\":\"%s\"}", dir);
     printf("Sending to pupper: %s\n", json);
     https_post_json(PUPPER_URL, json);
+}
+
+/* ---------------- Robot Orientation Helpers ---------------- */
+
+static void turn_left_and_update(void) {
+    send_pupper_move("left");
+    SDL_Delay(250);
+    robot_heading = (robot_heading + 3) % 4;
+}
+
+static void turn_right_and_update(void) {
+    send_pupper_move("right");
+    SDL_Delay(250);
+    robot_heading = (robot_heading + 1) % 4;
+}
+
+static void move_forward_step(void) {
+    send_pupper_move("forward");
+    SDL_Delay(250);
+}
+
+static int desired_heading_from_step(int oldx, int oldy, int newx, int newy) {
+    if (newx == oldx && newy == oldy - 1) return DIR_NORTH;
+    if (newx == oldx + 1 && newy == oldy) return DIR_EAST;
+    if (newx == oldx && newy == oldy + 1) return DIR_SOUTH;
+    if (newx == oldx - 1 && newy == oldy) return DIR_WEST;
+    return -1;
+}
+
+static void orient_and_move_forward(int oldx, int oldy, int newx, int newy) {
+    int desired = desired_heading_from_step(oldx, oldy, newx, newy);
+    if (desired == -1) return;
+
+    int diff = (desired - robot_heading + 4) % 4;
+
+    if (diff == 1) {
+        turn_right_and_update();
+    } else if (diff == 2) {
+        turn_right_and_update();
+        turn_right_and_update();
+    } else if (diff == 3) {
+        turn_left_and_update();
+    }
+
+    move_forward_step();
 }
 
 /* ---------------- Maze Helpers ---------------- */
@@ -355,6 +408,7 @@ int main(void) {
                     px = 0;
                     py = 0;
                     move_sequence = 0;
+                    robot_heading = DIR_NORTH;
                 }
 
                 if (k == SDLK_SPACE) {
@@ -382,15 +436,7 @@ int main(void) {
                             py = path[i].y;
                             move_sequence++;
 
-                            if (py < oldy) {
-                                send_pupper_move("forward");
-                            } else if (py > oldy) {
-                                send_pupper_move("backward");
-                            } else if (px < oldx) {
-                                send_pupper_move("left");
-                            } else if (px > oldx) {
-                                send_pupper_move("right");
-                            }
+                            orient_and_move_forward(oldx, oldy, px, py);
 
                             draw(r, px, py);
                             SDL_Delay(120);
@@ -409,18 +455,12 @@ int main(void) {
                 else if (k == SDLK_d || k == SDLK_RIGHT) dx = 1;
 
                 if (dx != 0 || dy != 0) {
+                    int oldx = px;
+                    int oldy = py;
+
                     if (try_move(&px, &py, dx, dy)) {
                         move_sequence++;
-
-                        if (dy == -1) {
-                            send_pupper_move("forward");
-                        } else if (dy == 1) {
-                            send_pupper_move("backward");
-                        } else if (dx == -1) {
-                            send_pupper_move("left");
-                        } else if (dx == 1) {
-                            send_pupper_move("right");
-                        }
+                        orient_and_move_forward(oldx, oldy, px, py);
                     }
                 }
             }
