@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maze Pupper 2 · Mission Control with AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <style>
+        /* Styles - same as previous dashboard */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0c15;
+            font-family: 'Inter', sans-serif;
+            padding: 1.5rem;
+            min-height: 100vh;
+        }
+        .dashboard { max-width: 1600px; margin: 0 auto; }
+        .header {
+            background: rgba(18, 25, 45, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 2rem;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .title h1 {
+            font-size: 1.6rem;
+            background: linear-gradient(135deg, #fff, #0ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .title p { color: #7f8c8d; font-size: 0.75rem; margin-top: 0.2rem; }
+        .status-badge {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            border-radius: 2rem;
+            padding: 0.4rem 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            font-size: 0.8rem;
+            color: #0ff;
+        }
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #4cd964;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        .card {
+            background: rgba(18, 25, 45, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 255, 0.15);
+            border-radius: 1.2rem;
+            padding: 1rem;
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 255, 255, 0.4);
+        }
+        .card-full { grid-column: span 4; }
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid rgba(0, 255, 255, 0.2);
+        }
+        .card-header i { font-size: 1.2rem; color: #0ff; width: 1.8rem; }
+        .card-header h3 { font-size: 0.95rem; color: #e0e0e0; }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.3rem 0;
+            border-bottom: 1px dashed rgba(255,255,255,0.05);
+            font-size: 0.75rem;
+        }
+        .stat-label { color: #8e9aaf; font-family: monospace; }
+        .stat-value { color: #0ff; font-weight: 500; font-family: monospace; }
+        .stat-value.success { color: #4cd964; }
+        .progress-bar {
+            background: #1a2335;
+            height: 4px;
+            border-radius: 10px;
+            margin: 0.4rem 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 4px;
+            background: linear-gradient(90deg, #0ff, #3f6cff);
+            width: 0%;
+            border-radius: 10px;
+        }
+        .chat-messages {
+            height: 280px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .chat-message { margin-bottom: 0.8rem; display: flex; }
+        .chat-message.user { justify-content: flex-end; }
+        .chat-message.assistant { justify-content: flex-start; }
+        .message-bubble {
+            max-width: 80%;
+            padding: 0.5rem 0.8rem;
+            border-radius: 1rem;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        .chat-message.user .message-bubble {
+            background: linear-gradient(135deg, #0ff2, #0f62);
+            border-bottom-right-radius: 0.2rem;
+        }
+        .chat-message.assistant .message-bubble {
+            background: rgba(30, 40, 60, 0.8);
+            border-bottom-left-radius: 0.2rem;
+        }
+        .chat-input-area {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .chat-input-area input {
+            flex: 1;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(0,255,255,0.3);
+            border-radius: 2rem;
+            padding: 0.6rem 1rem;
+            color: white;
+            outline: none;
+        }
+        .chat-input-area button {
+            background: rgba(0,255,255,0.1);
+            border: 1px solid #0ff;
+            border-radius: 2rem;
+            padding: 0.6rem 1.2rem;
+            color: #0ff;
+            cursor: pointer;
+        }
+        .model-selector {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-left: auto;
+        }
+        .model-selector select {
+            background: rgba(0,0,0,0.4);
+            border: 1px solid rgba(0,255,255,0.3);
+            border-radius: 1rem;
+            padding: 0.2rem 0.6rem;
+            color: #0ff;
+        }
+        @media (max-width: 1000px) {
+            .grid { grid-template-columns: repeat(2, 1fr); }
+            .card-full { grid-column: span 2; }
+        }
+        @media (max-width: 600px) {
+            .grid { grid-template-columns: 1fr; }
+            .card-full { grid-column: span 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <div class="title">
+                <h1>MAZE·PUPPER 2</h1>
+                <p>live telemetry · AI-powered analysis</p>
+            </div>
+            <div class="status-badge">
+                <div class="live-dot"></div>
+                <span id="data-status">WAITING FOR MAZE DATA...</span>
+                <i class="fas fa-robot"></i>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- Maze Mission Card -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-map-signs"></i><h3>MAZE MISSION</h3></div>
+                <div class="stat-row"><span class="stat-label">Position</span><span class="stat-value" id="player-position">(0,0)</span></div>
+                <div class="stat-row"><span class="stat-label">Progress</span><span class="stat-value" id="mission-progress">0%</span></div>
+                <div class="progress-bar"><div class="progress-fill" id="mission-progress-bar"></div></div>
+                <div class="stat-row"><span class="stat-label">Moves</span><span class="stat-value" id="move-count">0</span></div>
+                <div class="stat-row"><span class="stat-label">Goal</span><span class="stat-value" id="goal-status">Not reached</span></div>
+            </div>
+
+            <!-- Mini Pupper Card -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-robot"></i><h3>MINI PUPPER</h3></div>
+                <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value success" id="pupper-status">● ONLINE</span></div>
+                <div class="stat-row"><span class="stat-label">Battery</span><span class="stat-value" id="pupper-battery">--%</span></div>
+                <div class="progress-bar"><div class="progress-fill" id="battery-bar"></div></div>
+                <div class="stat-row"><span class="stat-label">Signal</span><span class="stat-value" id="pupper-signal">-- dBm</span></div>
+            </div>
+
+            <!-- Database Cards -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-database"></i><h3>MONGODB</h3></div>
+                <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value" id="mongo-status">● CONNECTED</span></div>
+                <div class="stat-row"><span class="stat-label">Latency</span><span class="stat-value" id="mongo-latency">-- ms</span></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><i class="fas fa-memory"></i><h3>REDIS</h3></div>
+                <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value" id="redis-status">● CONNECTED</span></div>
+                <div class="stat-row"><span class="stat-label">Keys</span><span class="stat-value" id="redis-keys">--</span></div>
+            </div>
+
+            <!-- Telemetry Card -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-chart-line"></i><h3>TELEMETRY</h3></div>
+                <div class="stat-row"><span class="stat-label">Stability</span><span class="stat-value" id="telemetry-stability">--%</span></div>
+                <div class="stat-row"><span class="stat-label">Data Rate</span><span class="stat-value" id="telemetry-rate">-- KB/s</span></div>
+            </div>
+
+            <!-- System Card -->
+            <div class="card">
+                <div class="card-header"><i class="fas fa-microchip"></i><h3>SYSTEM</h3></div>
+                <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value" id="cpu-load">--%</span></div>
+                <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value" id="ram-usage">-- / -- GB</span></div>
+            </div>
+
+            <!-- AI CHATBOT - Full Width -->
+            <div class="card card-full">
+                <div class="card-header">
+                    <i class="fas fa-brain"></i>
+                    <h3>AI ASSISTANT (Llama 3) - Ask about your maze data</h3>
+                    <div class="model-selector">
+                        <select id="model-select">
+                            <option value="llama3">llama3:8b</option>
+                            <option value="llama3.2">llama3.2:3b</option>
+                        </select>
+                        <button id="clear-chat-btn" style="background: rgba(255,100,100,0.1); border-color: #ff6b6b; color: #ff6b6b;">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="chat-message assistant">
+                        <div class="message-bubble">
+                            🤖 <strong>AI Assistant Ready!</strong><br><br>
+                            I can analyze the maze telemetry data. Ask me things like:<br>
+                            • "What's the current mission progress?"<br>
+                            • "Analyze the battery trend"<br>
+                            • "Is the robot on track to reach the goal?"<br>
+                            • "Summarize the system status"
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Ask about the maze data...">
+                    <button id="send-btn"><i class="fas fa-paper-plane"></i> Send</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <i class="fas fa-sync-alt"></i> Live from maze program · AI powered by Ollama
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'redis_api.php';
+        const OLLAMA_API = 'ollama_api.php';
+        
+        let currentModel = 'llama3';
+        let chatHistory = [];
+        let currentData = {};
+        
+        // Fetch telemetry from Redis (via PHP)
+        async function fetchTelemetry() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                currentData = data;
+                
+                // Update UI
+                document.getElementById('player-position').textContent = 
+                    `(${data.maze?.position?.x || 0}, ${data.maze?.position?.y || 0})`;
+                document.getElementById('mission-progress').textContent = (data.maze?.progress || 0) + '%';
+                document.getElementById('mission-progress-bar').style.width = (data.maze?.progress || 0) + '%';
+                document.getElementById('move-count').textContent = data.maze?.moveset || 0;
+                document.getElementById('goal-status').textContent = data.maze?.goal_reached ? '✓ REACHED!' : 'In progress';
+                
+                document.getElementById('pupper-battery').textContent = (data.pupper?.battery || 0) + '%';
+                document.getElementById('battery-bar').style.width = (data.pupper?.battery || 0) + '%';
+                document.getElementById('pupper-signal').textContent = (data.pupper?.signal || 0) + ' dBm';
+                
+                document.getElementById('mongo-latency').textContent = (data.mongodb?.latency || 0) + ' ms';
+                document.getElementById('redis-keys').textContent = (data.redis?.keys || 0).toLocaleString();
+                document.getElementById('telemetry-stability').textContent = (data.telemetry?.stability || 0) + '%';
+                document.getElementById('telemetry-rate').textContent = (data.telemetry?.dataRate || 0) + ' KB/s';
+                document.getElementById('cpu-load').textContent = (data.system?.cpu || 0) + '%';
+                document.getElementById('ram-usage').textContent = `${data.system?.ramUsed || 0} / ${data.system?.ramTotal || 16} GB`;
+                
+                const statusText = data.maze?.position?.x > 0 ? 'RECEIVING MAZE DATA' : 'WAITING FOR MAZE...';
+                document.getElementById('data-status').textContent = statusText;
+                document.getElementById('data-status').style.color = data.maze?.position?.x > 0 ? '#4cd964' : '#ffaa00';
+                
+            } catch (error) {
+                console.error('Fetch error:', error);
+                document.getElementById('data-status').textContent = 'CONNECTION ERROR';
+            }
+        }
+        
+        // Get current system context for AI
+        async function getSystemContext() {
+            return {
+                maze: {
+                    position: currentData.maze?.position || { x: 0, y: 0 },
+                    progress: currentData.maze?.progress || 0,
+                    moves: currentData.maze?.moveset || 0,
+                    goal_reached: currentData.maze?.goal_reached || false
+                },
+                pupper: {
+                    battery: currentData.pupper?.battery || 0,
+                    signal: currentData.pupper?.signal || 0
+                },
+                mongodb: {
+                    latency: currentData.mongodb?.latency || 0
+                },
+                telemetry: {
+                    stability: currentData.telemetry?.stability || 0
+                },
+                timestamp: new Date().toISOString()
+            };
+        }
+        
+        // Send message to Ollama
+        async function sendToOllama(userMessage) {
+            const systemContext = await getSystemContext();
+            
+            const response = await fetch(OLLAMA_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage,
+                    model: currentModel,
+                    system_context: JSON.stringify(systemContext, null, 2),
+                    history: chatHistory
+                })
+            });
+            
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            const data = await response.json();
+            return data.reply;
+        }
+        
+        function addMessage(role, content) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+            messageDiv.innerHTML = `<div class="message-bubble">${marked.parse(content)}</div>`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        async function handleSend() {
+            const input = document.getElementById('chat-input');
+            const sendBtn = document.getElementById('send-btn');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            input.value = '';
+            sendBtn.disabled = true;
+            
+            addMessage('user', message);
+            chatHistory.push({ role: 'user', content: message });
+            
+            const thinkingDiv = document.createElement('div');
+            thinkingDiv.className = 'chat-message assistant';
+            thinkingDiv.id = 'thinking-indicator';
+            thinkingDiv.innerHTML = '<div class="message-bubble"><i class="fas fa-circle-notch fa-spin"></i> Analyzing maze data...</div>';
+            document.getElementById('chat-messages').appendChild(thinkingDiv);
+            
+            try {
+                const reply = await sendToOllama(message);
+                document.getElementById('thinking-indicator')?.remove();
+                addMessage('assistant', reply);
+                chatHistory.push({ role: 'assistant', content: reply });
+                if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+            } catch (error) {
+                document.getElementById('thinking-indicator')?.remove();
+                addMessage('assistant', `❌ Error: ${error.message}`);
+            }
+            
+            sendBtn.disabled = false;
+            input.focus();
+        }
+        
+        function clearChat() {
+            const messagesDiv = document.getElementById('chat-messages');
+            messagesDiv.innerHTML = `<div class="chat-message assistant"><div class="message-bubble">✨ Chat cleared! Ask me about the maze data.</div></div>`;
+            chatHistory = [];
+        }
+        
+        // Initialize
+        document.getElementById('model-select').addEventListener('change', (e) => {
+            currentModel = e.target.value;
+        });
+        document.getElementById('send-btn').addEventListener('click', handleSend);
+        document.getElementById('clear-chat-btn').addEventListener('click', clearChat);
+        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') handleSend();
+        });
+        
+        fetchTelemetry();
+        setInterval(fetchTelemetry, 2000);
+    </script>
+</body>
+</html>
