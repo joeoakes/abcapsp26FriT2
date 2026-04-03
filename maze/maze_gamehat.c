@@ -12,7 +12,7 @@
 #define PAD 16
 
 #define PUPPER_URL "https://10.170.8.119:8449/"
-#define TELEMETRY_URL "http://10.14.4.199:8000/maze_bridge.php"
+#define TELEMETRY_URL "http://100.64.47.183:8000/maze_bridge.php"
 #define FRAME_PATH "/tmp/maze_latest.bmp"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
