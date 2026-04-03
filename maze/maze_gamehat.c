@@ -195,12 +195,16 @@ static void orient_and_move_forward(int oldx, int oldy, int newx, int newy) {
     if (desired == -1) return;
 
     int diff = (desired - robot_heading + 4) % 4;
-    if (diff == 1) turn_right_and_update();
+    if (diff == 1) {
+        turn_right_and_update();
+    }
     else if (diff == 2) {
         turn_right_and_update();
         turn_right_and_update();
     }
-    else if (diff == 3) turn_left_and_update();
+    else if (diff == 3) {
+        turn_left_and_update();
+    }
 
     move_forward_step();
 }
@@ -543,31 +547,26 @@ int main(void) {
 
                     if (try_move(&px, &py, dx, dy)) {
                         int desired = desired_heading_from_step(oldx, oldy, px, py);
+                        const char *move_dir = "forward";
 
                         if (desired == robot_heading) {
-                            move_sequence++;
                             move_forward_step();
-
-                            bool goal_reached = (px == MAZE_W - 1 && py == MAZE_H - 1);
-                            draw(r, px, py);
-                            send_maze_telemetry("manual_move", px, py, "forward", goal_reached, 1, astar_running, path_len, path_idx);
+                            move_dir = "forward";
                         }
                         else if (((desired + 2) % 4) == robot_heading) {
-                            move_sequence++;
                             move_backward_step();
-
-                            bool goal_reached = (px == MAZE_W - 1 && py == MAZE_H - 1);
-                            draw(r, px, py);
-                            send_maze_telemetry("manual_move", px, py, "backward", goal_reached, 1, astar_running, path_len, path_idx);
+                            move_dir = "backward";
                         }
                         else {
                             orient_and_move_forward(oldx, oldy, px, py);
-                            move_sequence++;
-
-                            bool goal_reached = (px == MAZE_W - 1 && py == MAZE_H - 1);
-                            draw(r, px, py);
-                            send_maze_telemetry("manual_move", px, py, "forward", goal_reached, 1, astar_running, path_len, path_idx);
+                            move_dir = "forward";
                         }
+
+                        move_sequence++;
+
+                        bool goal_reached = (px == MAZE_W - 1 && py == MAZE_H - 1);
+                        draw(r, px, py);
+                        send_maze_telemetry("manual_move", px, py, move_dir, goal_reached, 1, astar_running, path_len, path_idx);
                     }
                 }
 
