@@ -12,7 +12,7 @@ $redis_connected = false;
 
 try {
     $redis = new Redis();
-    if ($redis->connect('10.170.8.109', 6379, 2)) {
+    if ($redis->connect('127.0.0.1', 6379, 2)) {
         $redis_connected = true;
     }
 } catch (Exception $e) {
