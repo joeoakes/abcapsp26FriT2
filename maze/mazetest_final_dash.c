@@ -22,7 +22,7 @@ void draw(SDL_Renderer *r, int px, int py);
 #define MOVE_URL "https://10.170.8.130:8448/move"
 
 // DASHBOARD BRIDGE (your web server)
-#define DASHBOARD_URL "https://my.up.ist.psu.edu/jcc6088/440W/maze-pupper-dashboard.html"
+#define DASHBOARD_URL "https://my.up.ist.psu.edu/jcc6088/440W/maze_bridge.php"
 
 enum { WALL_N = 1, WALL_E = 2, WALL_S = 4, WALL_W = 8 };
 
