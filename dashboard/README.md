@@ -1,70 +1,40 @@
-# Maze Pupper 2 - Live Network Dashboard
+# Maze Pupper 2 · Mission Control Dashboard
 
-A real-time monitoring dashboard for the Maze Pupper 2 robotics system, featuring live network status, service monitoring, and interactive maze visualization.
+A real-time, AI-powered web dashboard for monitoring an autonomous Mini Pupper robot running an A* pathfinding algorithm. This system visualizes live maze telemetry, hardware status, and database metrics, and features an integrated Llama 3 assistant to analyze mission data on the fly.
 
+## 🌟 Features
+* **Real-Time Telemetry:** Live updates of the robot's (X,Y) coordinates, move sequence, and mission progress.
+* **Hardware Monitoring:** Displays Mini Pupper battery life, signal strength, and system CPU/RAM usage.
+* **Database Tracking:** Monitors latency and connection status for the dual-database backend (Redis & MongoDB).
+* **AI Mission Assistant:** An integrated chat interface powered by local Llama 3 models (via Ollama) that uses the live telemetry as context to answer questions about the current run.
 
-## Overview
+## 🏗️ Architecture
+The project is decoupled into three main layers:
 
-This dashboard provides a unified interface for monitoring all components of the Maze Pupper 2 system, including:
-- Database connections (MongoDB, Redis)
-- Mini Pupper 2 robot telemetry
-- Network and VPN status
-- Mission tracking with maze path visualization
-- AprilTag computer vision tracking
-- System resource monitoring
+1. **The Data Generator (C Program):** Runs the A* algorithm, controls the Mini Pupper, and sends POST requests containing JSON telemetry.
+2. **The PHP Bridge (Backend):** * `maze_bridge.php`: Catches the POST requests from the C program and writes the data to the Redis server.
+    * `redis_api.php`: Pulls the latest telemetry from Redis to feed the dashboard.
+    * `olama_api.php`: Injects the live telemetry into a system prompt and bridges the dashboard chat with a local Ollama instance.
+3. **The Dashboard (Frontend):** `maze-pupper-dashboard.html` dynamically fetches data every 2 seconds to update the UI and provides the AI chat interface.
 
-## Features
+## 📋 Prerequisites
+* **Web Server:** A server with PHP enabled (e.g., PSU webfiles, Apache, Nginx).
+* **Redis Server:** Hosted on a reachable IP (e.g., WSL Ubuntu) with port `6379` open.
+* **Ollama:** Installed locally or on a network server, with the `llama3` or `llama3.2` models pulled.
+* **C Compiler:** For compiling the maze logic (`gcc` with SDL2 and libcurl).
 
-### 🗺️ **Maze Visualization**
-- Interactive 12x12 grid maze
-- Real-time path animation
-- Step-by-step movement control
-- Random path generation
-- Visual representation of robot position (S=Start, E=End, cyan dot=current position)
+## 🚀 Setup & Installation
 
-### 🌐 **Network Monitoring**
-- Automatic VPN detection
-- Real-time IP address tracking
-- Connection status for all services
-- Latency monitoring
-- Signal strength visualization
+### 1. Database & AI Setup
+1. **Configure Redis:** Ensure your Redis server accepts external connections.
+   * Open `/etc/redis/redis.conf`
+   * Set `bind 0.0.0.0`
+   * Set `protected-mode no`
+   * Restart the service: `sudo systemctl restart redis-server`
+2. **Start Ollama:** Ensure your Ollama server is running and accessible.
 
-### 🤖 **Service Status**
-- **MongoDB**: Connection status, latency, storage usage
-- **Redis**: Cache status, hit rate, memory usage
-- **Mini Pupper 2**: Battery, temperature, LIDAR status, signal strength
-- **AprilTag**: Vision tracking PC, tag positions, confidence levels
-
-### 📊 **Telemetry**
-- Movement file size tracking
-- Connection stability metrics
-- Data rate monitoring
-- Packet count
-
-### 💻 **System Resources**
-- CPU load with visual progress bar
-- RAM usage
-- System uptime
-- Local IP address
-
-## Technology Stack
-
-- **Frontend**: HTML5, CSS3, JavaScript (ES6)
-- **Styling**: Glassmorphism design with gradient effects
-- **Icons**: Font Awesome 6
-- **Fonts**: Inter, JetBrains Mono
-- **Visualization**: HTML5 Canvas API
-- **Network Detection**: WebRTC API
-
-## Installation
-
-### Prerequisites
-- Modern web browser (Chrome, Firefox, Safari, Edge)
-- No server required - runs entirely in the browser
-
-### Quick Start
-
-1. **Download the Dashboard**
-   ```bash
-   git clone https://github.com/yourusername/maze-pupper-dashboard.git
-   cd maze-pupper-dashboard
+### 2. Configure the Backend (PHP)
+Upload the `.php` files and the `.html` dashboard to your web server. Update the IP addresses in the PHP scripts to match your network topology:
+* In `redis_api.php` and `maze_bridge.php`: Update the Redis connection IP:
+  ```php
+  $redis->connect('YOUR_REDIS_SERVER_IP', 6379, 2)
