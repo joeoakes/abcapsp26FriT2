@@ -1,10 +1,3 @@
-Ah, I completely understand! My apologies for stripping away too much of your original setup. You want to keep the application as a **control hub** that continues to talk to your physical Mini Pupper and your telemetry server, but you want it to run smoothly as a desktop app using standard keyboard controls without freezing up.
-To achieve this, I have restored all of your network endpoints, the robot orientation math, and the JSON telemetry.
-To fix the massive freezing issues so it actually runs nicely on your PC, I implemented two major architectural changes:
- 1. **Asynchronous Network Threads:** I wrapped your curl functions in SDL_CreateThread. Now, when you press a key, the program fires the HTTP requests into the background. Your local game window will instantly respond without waiting 5 seconds for the server to reply.
- 2. **Non-Blocking A* Timer:** I replaced the SDL_Delay(3000) in your A* solver with a non-blocking frame timer. The physical robot will still get 3 seconds to execute its move, but your application window will remain completely responsive, allowing you to hit the Spacebar to emergency stop it at any time.
-Here is your fixed, fully network-capable local desktop application:
-```c
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 #include <stdbool.h>
@@ -20,6 +13,7 @@ Here is your fixed, fully network-capable local desktop application:
 #define CELL 32
 #define PAD 16
 
+// Original endpoints
 #define PUPPER_URL "https://10.170.8.119:8449/"
 #define TELEMETRY_URL "http://10.170.8.109/maze_bridge.php"
 #define FRAME_PATH "maze_latest.bmp"
@@ -37,13 +31,11 @@ static bool astar_running = false;
 
 /* ---------------- Asynchronous Networking ---------------- */
 
-// Struct to pass data to the background thread
 typedef struct {
     char url[256];
     char json[1024];
 } NetPayload;
 
-// Background thread function so cURL doesn't freeze the main window
 static int bg_network_thread(void *data) {
     NetPayload *p = (NetPayload *)data;
     CURL *curl = curl_easy_init();
@@ -57,26 +49,25 @@ static int bg_network_thread(void *data) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, p->json);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L); // 3 second timeout
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L); 
 
-        curl_easy_perform(curl); // Perform request silently
+        curl_easy_perform(curl);
 
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
     }
     
-    free(p); // Free the payload allocated in async_post
+    free(p); 
     return 0;
 }
 
-// Fire-and-forget JSON POST
 static void async_post(const char *url, const char *json) {
     NetPayload *p = malloc(sizeof(NetPayload));
     strncpy(p->url, url, sizeof(p->url) - 1);
     strncpy(p->json, json, sizeof(p->json) - 1);
     
     SDL_Thread *thread = SDL_CreateThread(bg_network_thread, "HTTP_Thread", (void *)p);
-    SDL_DetachThread(thread); // Let the thread run independently
+    SDL_DetachThread(thread); 
 }
 
 static void send_pupper_move(const char *dir) {
@@ -127,7 +118,6 @@ static void send_maze_telemetry(
 static uint32_t last_frame_save_time = 0;
 
 static void save_maze_frame(SDL_Renderer *r, const char *filename) {
-    // Only save frame once every 500ms to prevent disk thrashing
     uint32_t current_time = SDL_GetTicks();
     if (current_time - last_frame_save_time < 500) return;
     last_frame_save_time = current_time;
@@ -148,7 +138,7 @@ static void save_maze_frame(SDL_Renderer *r, const char *filename) {
 
 static void turn_left_and_update(void) {
     send_pupper_move("left");
-    SDL_Delay(250); // Small local delay so physical robot receives distinct commands
+    SDL_Delay(250); 
     robot_heading = (robot_heading + 3) % 4;
 }
 
@@ -401,7 +391,7 @@ int main(void) {
                         path_len = astar(path, px, py);
                         path_idx = 1; 
                         astar_running = true;
-                        last_astar_step_time = SDL_GetTicks(); // Start timer
+                        last_astar_step_time = SDL_GetTicks(); 
                         send_maze_telemetry("astar_start", px, py, "astar", false, 1, astar_running, path_len, path_idx);
                     } else {
                         astar_running = false;
@@ -440,7 +430,6 @@ int main(void) {
             }
         }
 
-        // Non-blocking A* step execution (Wait 3000ms per physical robot move)
         if (astar_running) {
             uint32_t current_time = SDL_GetTicks();
             if (current_time - last_astar_step_time >= 3000) {
@@ -467,7 +456,7 @@ int main(void) {
         }
 
         draw(r, px, py);
-        SDL_Delay(16); // ~60fps
+        SDL_Delay(16); 
     }
 
     send_maze_telemetry("shutdown", px, py, "shutdown", false, 1, astar_running, path_len, path_idx);
@@ -478,5 +467,3 @@ int main(void) {
     curl_global_cleanup();
     return 0;
 }
-
-```
