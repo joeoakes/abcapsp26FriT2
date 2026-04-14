@@ -1,70 +1,30 @@
-# Maze Pupper 2 - Live Network Dashboard
+# 🛰️ Maze Pupper 2: Mission Control
+### AI-Powered Robotics Telemetry & Analysis System
 
-A real-time monitoring dashboard for the Maze Pupper 2 robotics system, featuring live network status, service monitoring, and interactive maze visualization.
+## 📌 Project Overview
+This system provides a real-time, high-visibility dashboard for the **Mini Pupper 2** robotics platform. It integrates live telemetry from a C-based maze application, persists data via **Redis**, and utilizes a local **Llama 3 (Ollama)** instance to provide formal mission analysis and status reports.
 
+---
 
-## Overview
+## 🏗️ System Architecture
+The project is built on a "Bridge" architecture to facilitate communication between the robot's local environment and the university's server infrastructure:
 
-This dashboard provides a unified interface for monitoring all components of the Maze Pupper 2 system, including:
-- Database connections (MongoDB, Redis)
-- Mini Pupper 2 robot telemetry
-- Network and VPN status
-- Mission tracking with maze path visualization
-- AprilTag computer vision tracking
-- System resource monitoring
+1.  **Robot Client (C/SDL2):** Executes pathfinding (A*) and transmits coordinates to the Bridge.
+2.  **Python Bridge:** Acts as the central nervous system, handling `POST` telemetry and serving `GET` requests to the dashboard while managing **CORS** for secure browser access.
+3.  **Redis Database:** Stores the state of the maze and robot mission.
+4.  **Ollama (Llama 3):** Serves as the Mission Control Analyst, processing natural language queries about live data.
+5.  **Web Dashboard:** A high-contrast "Ocean Blue" interface designed for large-screen presentations.
 
-## Features
+---
 
-### 🗺️ **Maze Visualization**
-- Interactive 12x12 grid maze
-- Real-time path animation
-- Step-by-step movement control
-- Random path generation
-- Visual representation of robot position (S=Start, E=End, cyan dot=current position)
+## 🚀 Getting Started
 
-### 🌐 **Network Monitoring**
-- Automatic VPN detection
-- Real-time IP address tracking
-- Connection status for all services
-- Latency monitoring
-- Signal strength visualization
+### 1. Server-Side Setup (PSU Server)
+Ensure **Redis** and **Ollama** are installed and running on your server (`10.170.8.109`).
 
-### 🤖 **Service Status**
-- **MongoDB**: Connection status, latency, storage usage
-- **Redis**: Cache status, hit rate, memory usage
-- **Mini Pupper 2**: Battery, temperature, LIDAR status, signal strength
-- **AprilTag**: Vision tracking PC, tag positions, confidence levels
+```bash
+# Start the AI service
+ollama serve
 
-### 📊 **Telemetry**
-- Movement file size tracking
-- Connection stability metrics
-- Data rate monitoring
-- Packet count
-
-### 💻 **System Resources**
-- CPU load with visual progress bar
-- RAM usage
-- System uptime
-- Local IP address
-
-## Technology Stack
-
-- **Frontend**: HTML5, CSS3, JavaScript (ES6)
-- **Styling**: Glassmorphism design with gradient effects
-- **Icons**: Font Awesome 6
-- **Fonts**: Inter, JetBrains Mono
-- **Visualization**: HTML5 Canvas API
-- **Network Detection**: WebRTC API
-
-## Installation
-
-### Prerequisites
-- Modern web browser (Chrome, Firefox, Safari, Edge)
-- No server required - runs entirely in the browser
-
-### Quick Start
-
-1. **Download the Dashboard**
-   ```bash
-   git clone https://github.com/yourusername/maze-pupper-dashboard.git
-   cd maze-pupper-dashboard
+# Run the Python Bridge
+python3 bridge.py
