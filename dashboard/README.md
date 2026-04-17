@@ -1,198 +1,109 @@
 # Maze Pupper 2 – AI Telemetry Dashboard
-
-An integrated system where a C‑based maze solver (A* algorithm) sends telemetry to Redis, which is then displayed on a live dashboard. A Python bridge connects Redis to a web UI, and an Ollama‑powered AI assistant (Llama 3) answers questions about the maze and system metrics.
-
+An integrated robotics telemetry system where a local C‑based maze solver (with an A* algorithm) sends telemetry over the network to a remote Redis database. A custom Python bridge connects Redis to a web UI, streaming live SDL2 rendering, while an Ollama‑powered AI assistant (Llama 3) acts as a formal Mission Control Analyst to answer questions about the system metrics.
 ## Architecture Overview
+```text
+[ LOCAL MACHINE (Mac/NixOS) ]                 [ REMOTE SERVER (10.170.8.109) ]
+                                                            
+Maze Program (C + SDL2)   ──────(JSON)──────►   Redis Database
+          │                                           ▲
+      (Saves BMP)                                     │ (redis-cli)
+          ▼                                           ▼
+Python HTTP Server (8000)                   Python Bridge (Port 5000)
+          │                                           │
+          └─────────────► Web Dashboard ◄─────────────┘
+                            (HTML/JS)
+                                │
+                                ▼
+                        Ollama (Llama 3 AI)
 
 ```
-
-Maze Program (C + A* + SDL)  ──►  Redis  ◄──  Python Bridge (Flask)
-│
-▼
-Web Dashboard (HTML/JS)
-│
-▼
-Ollama (Llama 3 AI)
-
-```
-
-- **Maze Program**: Generates maze, moves robot, logs telemetry (position, moves, goal status).
-- **Redis**: Stores current state and metrics (JSON format).
-- **Python Bridge**: REST API to read/write Redis data and forward AI queries to Ollama.
-- **Dashboard**: Real‑time telemetry display, maze visualisation, and AI chat.
-- **Ollama**: Local LLM that answers questions based on live telemetry.
-
+ * **Maze Program (maze_laptop.c)**: Generates the maze natively, processes movement, saves a live .bmp frame every 500ms, and pushes JSON telemetry (position, moves, A* status).
+ * **Redis**: Stores current telemetry state under the team2f:latest_telemetry key.
+ * **Python Bridge (bridge.py)**: A lightweight, dependency-free BaseHTTPRequestHandler that acts as a REST API to fetch Redis data and forward analyst queries to Ollama.
+ * **Dashboard (maze-pupper-dashboard.html)**: Real‑time telemetry grid, live SDL2 maze stream (bypassing browser cache), and integrated Mission Control chat.
+ * **Ollama**: Local LLM running on the remote server providing formal technical analysis based on live JSON telemetry.
 ## Features
-
-- ✅ A* pathfinding in the maze (press `p` to auto‑solve)
-- ✅ Real‑time telemetry updates (position, move count, progress)
-- ✅ Web dashboard with live maze visualisation
-- ✅ AI assistant (Llama 3) – ask questions like:
-  - *“What’s the current robot position?”*
-  - *“How many moves have been made?”*
-  - *“Is Redis connected?”*
-  - *“Analyse the telemetry stability.”*
-- ✅ Persistent Redis storage
-- ✅ Responsive design (works on desktop & mobile)
-
-## Requirements
-
-| Dependency          | Version / Notes                                   |
-|---------------------|---------------------------------------------------|
-| **C compiler**      | gcc (with SDL2 and libcurl development headers)  |
-| **Redis**           | 6.0+ (with RedisJSON, or use Redis Stack)        |
-| **Python**          | 3.8+                                              |
-| **Ollama**          | Latest (pull `llama3` model)                     |
-| **Web server**      | Any static server (Python `http.server`, Apache) |
-
+ * ✅ **Autonomous Navigation:** A* pathfinding in the maze (press q to toggle auto‑solve).
+ * ✅ **Manual Override:** WASD movement controls for the Pupper.
+ * ✅ **Real-Time Telemetry:** Live updates for coordinates, path index, and A* status.
+ * ✅ **Live Video Feed:** Streams native SDL2 rendering via local HTTP server without heavy video encoding.
+ * ✅ **Mission Control AI (Llama 3):** Ask technical questions like:
+   * *"Based on the current JSON data, what is the robot's heading?"* - *"Why is the A* solver currently halted?"* - *"Provide a formal status report of the telemetry stream."* ## Requirements
+| Dependency | Version / Notes |
+|---|---|
+| **C Compiler** | gcc (requires sdl2 and curl headers) |
+| **Redis** | 6.0+ (Requires redis-cli installed in $PATH) |
+| **Python** | 3.8+ (Standard library only; no pip installs needed) |
+| **Ollama** | Latest (must pull the llama3 model) |
 ## Installation & Setup
-
-### 1. Install system dependencies
-
-**Ubuntu / Debian**
+Because this project utilizes a split architecture to save local resources, setup is divided into Remote and Local environments.
+### Phase 1: Remote Infrastructure (e.g., PSU Server)
+**1. Install & Start Redis**
+Ensure the Redis server is running in the background.
 ```bash
-sudo apt update
-sudo apt install libsdl2-dev libcurl4-openssl-dev
+redis-server --daemonize yes
+
 ```
-
-macOS (Homebrew)
-
+**2. Setup Ollama**
+Install Ollama and download the Llama 3 model.
 ```bash
-brew install sdl2 curl
-```
-
-2. Install Redis (with RedisJSON)
-
-Use Docker (easiest):
-
-```bash
-docker run -d --name redis-stack -p 6379:6379 redis/redis-stack-server:latest
-```
-
-Or install natively: redis.io/docs/latest/operate/oss_and_stack/install/
-
-3. Install Python dependencies
-
-```bash
-pip install flask redis flask-cors
-```
-
-4. Install Ollama and pull the model
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3
-```
-
-(Ollama usually runs as a background service; start it with ollama serve if needed.)
-
-5. Place the files
-
-Create a directory with these files:
+curl -fsSL https://ollama.com/install.sh | sh 
+ollama pull llama3 
 
 ```
-project/
-├── maze_program.c        # Your C maze code (with A*)
-├── redis_bridge.py       # Python bridge (Flask app)
-├── dashboard.html        # Web dashboard
-└── README.md
-```
-
-6. Configure the C program
-
-Make sure the Redis endpoint is correct in maze_program.c:
-
-```c
-#define REDIS_HOST "127.0.0.1"
-#define REDIS_PORT 6379
-```
-
-Compile the maze:
-
-```bash
-gcc -o maze_program maze_program.c -lSDL2 -lcurl -lm
-```
-
-7. Run the services
-
-Open three terminals:
-
-Terminal 1 – Redis
-
-```bash
-redis-server
-# or if using Docker: docker start redis-stack
-```
-
-Terminal 2 – Python Bridge
-
-```bash
-python redis_bridge.py
-```
-
-Terminal 3 – Ollama
-
+Start the Ollama service in a background terminal session:
 ```bash
 ollama serve
+
 ```
-
-8. Serve the dashboard
-
+**3. Launch the Python Bridge**
+In a new terminal on the remote server, run the telemetry bridge:
 ```bash
-# From the project directory
-python -m http.server 8080
+python3 bridge.py
+
 ```
-
-Open http://localhost:8080/dashboard.html in your browser.
-
-9. Launch the maze
-
+*Note: Ensure port 5000 is open on this machine.*
+### Phase 2: Local Machine (Mac)
+**1. Install System Dependencies**
 ```bash
-./maze_program
+brew install sdl2 curl 
+
 ```
+**2. Compile the Maze Engine**
+```bash
+gcc -o maze_app maze_laptop.c -lSDL2 -lcurl -lm 
 
-Now use WASD or arrow keys to move the robot. Press p to run the A* solver. Watch the dashboard update in real time.
+```
+**3. Serve the Visuals & Dashboard**
+In the same directory as your compiled C app and HTML file, start the local HTTP server to host the BMP stream:
+```bash
+python3 -m http.server 8000
 
-Using the AI Assistant
-
-In the dashboard chat box, ask any question. The AI receives the current telemetry as context.
-
-Example questions:
-
-· “Where is the robot now?”
-· “What is the mission progress?”
-· “How many moves have been made?”
-· “Is Redis connected?”
-· “Analyse the telemetry stability.”
-· “Give me a system summary.”
-
-API Endpoints (Python Bridge)
-
-Endpoint Method Description
-/api/telemetry GET Returns all current telemetry (JSON)
-/api/telemetry POST Accepts new telemetry from the maze
-/api/chat POST Forwards a prompt to Ollama
-
-Troubleshooting
-
-Problem Solution
-curl/curl.h: No such file Install libcurl4-openssl-dev (or libcurl-devel).
-Maze cannot connect to Redis Check Redis is running: redis-cli ping.
-Dashboard shows no data Open browser console (F12) for fetch/CORS errors.
-Ollama not responding Run ollama serve in a terminal.
-Python bridge fails to start Install missing modules: pip install flask redis flask-cors.
-SDL2 compilation error Install libsdl2-dev and use pkg-config --cflags --libs sdl2.
-
-Customisation
-
-· Maze size: Edit MAZE_W and MAZE_H in the C code (update dashboard canvas too).
-· AI model: Change OLLAMA_MODEL in redis_bridge.py (e.g., llama3.2, phi3).
-· Telemetry fields: Extend the JSON structures in both the C program and the Python bridge.
-
-License
-
+```
+### Phase 3: Mission Launch
+ 1. Open your web browser and navigate to http://localhost:8000/maze-pupper-dashboard.html.
+ 2. In a new terminal tab on your local machine, launch the C executable:
+   ```bash
+   ./maze_app
+   
+   ```
+ 3. **Important:** Click on the "Mini Pupper Control Center" SDL2 window to bring it into focus.
+ 4. Press q to engage the A* pathfinder or use W/A/S/D to drive. Watch the dashboard update at 500ms intervals!
+## API Endpoints (bridge.py)
+| Endpoint | Method | Description |
+|---|---|---|
+| /telemetry_latest | GET | Uses redis-cli to return the most recent JSON telemetry |
+| /telemetry | POST | Accepts new telemetry payloads from the C application |
+| /ask_ai | POST | Injects the latest telemetry into a formal prompt and queries Llama 3 |
+| /maze_layout | GET | *(Optional/Legacy)* Retrieves static grid data if generated by C |
+## Troubleshooting
+| Problem | Solution |
+|---|---|
+| **bind: address already in use** | Ollama is already running as a background service. Use lsof -i :11434 and kill -9 <PID> if you need to restart it. |
+| **AI Error: 404 Not Found** | Ollama is running, but the Llama 3 model isn't downloaded. Run ollama pull llama3 on the remote server. |
+| **Dashboard stuck on static maze** | Ensure the C application window is currently in focus on your desktop and actively receiving keystrokes. |
+| **CORS / Fetch Errors** | Ensure you are connected to the necessary VPN to access the 10.170.x.x subnet. |
+## License
 MIT – free to use and modify.
+*Stand by for telemetry. Mission Control Online.* 🐶📡
 
----
-
-Enjoy your AI‑powered maze explorer! 🧠🤖🗺️
