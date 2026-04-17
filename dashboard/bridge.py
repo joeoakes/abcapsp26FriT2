@@ -1,6 +1,5 @@
 import json
 import subprocess
-import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -13,6 +12,7 @@ class TelemetryHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        # 1. Fetch Latest Telemetry
         if self.path == '/telemetry_latest':
             result = subprocess.run(['redis-cli', 'GET', 'team2f:latest_telemetry'], capture_output=True, text=True)
             data = result.stdout.strip() or "{}"
@@ -22,10 +22,21 @@ class TelemetryHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data.encode())
 
+        # 2. NEW: Fetch Maze Layout
+        elif self.path == '/maze_layout':
+            result = subprocess.run(['redis-cli', 'GET', 'team2f:maze_map'], capture_output=True, text=True)
+            maze_data = result.stdout.strip() or "[]"
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(maze_data.encode())
+
     def do_POST(self):
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
         
+        # 1. Post Telemetry (from the Robot/C Solver)
         if self.path == '/telemetry':
             data = json.loads(post_data.decode('utf-8'))
             subprocess.run(['redis-cli', 'SET', 'team2f:latest_telemetry', json.dumps(data)])
@@ -33,16 +44,16 @@ class TelemetryHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
 
+        # 2. AI Mission Control Analysis
         elif self.path == '/ask_ai':
             user_query = json.loads(post_data.decode('utf-8'))['question']
             result = subprocess.run(['redis-cli', 'GET', 'team2f:latest_telemetry'], capture_output=True, text=True)
             latest_data = result.stdout.strip() or "No active telemetry."
 
-            # FORMAL MISSION CONTROL PROMPT
             prompt = (
                 "System: You are a Mission Control Analyst for the Team 2F Robotics Project. "
                 "Provide a formal technical status report based on the provided JSON data. "
-                "Use professional terminology, bullet points for metrics, and no conversational filler. "
+                "Use professional terminology, bullet points, and no conversational filler. "
                 f"Data: {latest_data}. Inquiry: {user_query}"
             )
             
@@ -63,5 +74,5 @@ class TelemetryHandler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     server_address = ('', 5000)
     httpd = HTTPServer(server_address, TelemetryHandler)
-    print("Bridge + Formal AI Analyst running on port 5000...")
+    print("Bridge Online | Endpoints: /telemetry_latest, /maze_layout, /ask_ai")
     httpd.serve_forever()
