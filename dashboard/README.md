@@ -2,7 +2,7 @@
 An integrated robotics telemetry system where a local C‑based maze solver (with an A* algorithm) sends telemetry over the network to a remote Redis database. A custom Python bridge connects Redis to a web UI, streaming live SDL2 rendering, while an Ollama‑powered AI assistant (Llama 3) acts as a formal Mission Control Analyst to answer questions about the system metrics.
 ## Architecture Overview
 ```text
-[ LOCAL MACHINE (Mac/NixOS) ]                 [ REMOTE SERVER (10.170.8.109) ]
+[ LOCAL MACHINE  ]                           [ REMOTE SERVER (10.170.8.109) ]
                                                             
 Maze Program (C + SDL2)   ──────(JSON)──────►   Redis Database
           │                                           ▲
